@@ -628,17 +628,24 @@ class MainActivity : Activity() {
 
     private fun updateStickyCategoryHeader() {
         val activeKey = expandedCategoryPaths.lastOrNull()
-        val title = when {
-            activeKey == null -> "I TUOI CANALI"
-            activeKey == "special:favorites" -> "★ PREFERITI"
-            activeKey == "special:uncategorized" -> "DA CLASSIFICARE"
-            activeKey.startsWith("category:") -> activeKey.removePrefix("category:").uppercase()
-            else -> "I TUOI CANALI"
+        val (title, count) = when {
+            activeKey == null -> "I TUOI CANALI" to cloudChannels.size
+            activeKey == "special:favorites" -> "★ PREFERITI" to cloudChannels.count { it.url in favoriteUrls }
+            activeKey == "special:uncategorized" -> {
+                val categorized = cloudChannels.filter { it.category.isNotBlank() && !it.category.equals("Non classificati", true) }
+                "DA CLASSIFICARE" to (cloudChannels.size - categorized.size).coerceAtLeast(0)
+            }
+            activeKey.startsWith("category:") -> {
+                val category = activeKey.removePrefix("category:")
+                category.uppercase() to cloudChannels.count { it.category.trim().equals(category, true) }
+            }
+            else -> "I TUOI CANALI" to cloudChannels.size
         }
-        if (::channelsHeaderView.isInitialized) channelsHeaderView.text = title
+        val stickyLabel = "$title    ·  $count"
+        if (::channelsHeaderView.isInitialized) channelsHeaderView.text = stickyLabel
         if (::fullscreenDrawerHeader.isInitialized) {
-            fullscreenDrawerHeader.text = "  $title  ·  SELEZIONA"
-            fullscreenDrawerHeader.contentDescription = "Elenco $title. Premi per chiudere"
+            fullscreenDrawerHeader.text = "  $stickyLabel"
+            fullscreenDrawerHeader.contentDescription = "Elenco $title, $count canali. Premi per chiudere"
         }
     }
 
