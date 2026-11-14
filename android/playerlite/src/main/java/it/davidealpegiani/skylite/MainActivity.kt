@@ -1449,6 +1449,7 @@ class MainActivity : Activity() {
         retryTask?.let { retryHandler.removeCallbacks(it) }
         retryTask = null
         retryCount = 0
+        playerContainer.visibility = View.VISIBLE
         player?.apply {
             stop()
             clearMediaItems()
@@ -1456,6 +1457,7 @@ class MainActivity : Activity() {
             prepare()
             playWhenReady = true
         }
+        if (!isFullscreen) toggleFullscreen()
     }
 
     override fun onStop() {
