@@ -60,7 +60,9 @@ data class TvChannel(
     val url: String,
     val logo: String = "",
     var selected: Boolean = true,
-    var category: String = "Non classificati"
+    var category: String = "Non classificati",
+    var tvgId: String = "",
+    var tvgName: String = ""
 )
 
 @OptIn(UnstableApi::class)
@@ -617,6 +619,8 @@ class MainActivity : FragmentActivity() {
                             .put("url", channel.url)
                             .put("logo", channel.logo)
                             .put("category", channel.category)
+                            .put("tvgId", channel.tvgId)
+                            .put("tvgName", channel.tvgName)
                     )
                 }
                 runCloudAdminTask(
@@ -1166,11 +1170,15 @@ class MainActivity : FragmentActivity() {
     private fun parseChannels(text: String): List<TvChannel> {
         val found = mutableListOf<TvChannel>()
         val seen = mutableSetOf<String>()
-        fun add(nameRaw: String?, urlRaw: String?, logoRaw: String? = "", categoryRaw: String? = null) {
+        fun add(nameRaw: String?, urlRaw: String?, logoRaw: String? = "", categoryRaw: String? = null, tvgIdRaw: String? = null, tvgNameRaw: String? = null) {
             val name = nameRaw?.trim()?.takeIf { it.isNotBlank() } ?: return
             val url = urlRaw?.trim()?.replace("&amp;", "&")?.takeIf { it.startsWith("http://", true) || it.startsWith("https://", true) } ?: return
             val key = name.lowercase(Locale.ROOT) + "|" + url
-            if (seen.add(key)) found.add(TvChannel(name, url, logoRaw?.trim().orEmpty(), category = categoryRaw?.trim()?.takeIf { it.isNotBlank() } ?: "Non classificati"))
+            if (seen.add(key)) found.add(TvChannel(
+                name, url, logoRaw?.trim().orEmpty(),
+                category = categoryRaw?.trim()?.takeIf { it.isNotBlank() } ?: "Non classificati",
+                tvgId = tvgIdRaw?.trim().orEmpty(), tvgName = tvgNameRaw?.trim().orEmpty()
+            ))
         }
 
         val lines = text.lines()
@@ -1180,8 +1188,10 @@ class MainActivity : FragmentActivity() {
                 val name = line.substringAfterLast(',').trim()
                 val logo = Regex("tvg-logo=[\"']([^\"']+)").find(line)?.groupValues?.getOrNull(1).orEmpty()
                 val group = Regex("group-title=[\"']([^\"']+)").find(line)?.groupValues?.getOrNull(1)
+                val tvgId = Regex("tvg-id=[\"']([^\"']*)").find(line)?.groupValues?.getOrNull(1).orEmpty()
+                val tvgName = Regex("tvg-name=[\"']([^\"']*)").find(line)?.groupValues?.getOrNull(1).orEmpty()
                 val url = lines.drop(i + 1).firstOrNull { it.trim().isNotEmpty() && !it.trim().startsWith("#") }?.trim()
-                add(name, url, logo, group)
+                add(name, url, logo, group, tvgId, tvgName)
             }
         }
 
@@ -1209,7 +1219,9 @@ class MainActivity : FragmentActivity() {
                 field(obj, listOf("name", "title", "channel_name", "tvg-name")),
                 field(obj, listOf("url", "stream", "src", "link")),
                 field(obj, listOf("logo", "tvg-logo", "image", "icon")),
-                field(obj, listOf("category", "group", "group-title"))
+                field(obj, listOf("category", "group", "group-title")),
+                field(obj, listOf("tvg-id", "tvgId", "epg_id")),
+                field(obj, listOf("tvg-name", "tvgName"))
             )
         }
 
@@ -1229,7 +1241,9 @@ class MainActivity : FragmentActivity() {
                     o.optString("name", o.optString("title", o.optString("channel_name"))),
                     o.optString("url", o.optString("stream", o.optString("src", o.optString("link")))),
                     o.optString("logo", o.optString("tvg-logo")),
-                    o.optString("category", o.optString("group", o.optString("group-title")))
+                    o.optString("category", o.optString("group", o.optString("group-title"))),
+                    o.optString("tvg-id", o.optString("tvgId", o.optString("epg_id"))),
+                    o.optString("tvg-name", o.optString("tvgName"))
                 )
             }
         } catch (_: Exception) { }
@@ -1534,6 +1548,8 @@ class MainActivity : FragmentActivity() {
                             .put("url", channel.url)
                             .put("logo", channel.logo)
                             .put("category", channel.category)
+                            .put("tvgId", channel.tvgId)
+                            .put("tvgName", channel.tvgName)
                     )
                 }
                 runCloudAdminTask(

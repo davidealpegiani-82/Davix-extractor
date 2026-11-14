@@ -40,7 +40,7 @@ import androidx.media3.ui.PlayerView
 import org.json.JSONArray
 import org.json.JSONObject
 
-private data class CloudChannel(val name: String, val url: String, val logo: String = "", val category: String = "Non classificati")
+private data class CloudChannel(val name: String, val url: String, val logo: String = "", val category: String = "Non classificati", val tvgId: String = "", val tvgName: String = "")
 
 @UnstableApi
 class MainActivity : Activity() {
@@ -123,6 +123,8 @@ class MainActivity : Activity() {
     private val cloudHandler = Handler(Looper.getMainLooper())
     private val cloudExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
     private val cloudChannels = mutableListOf<CloudChannel>()
+    private val epgGuides = mutableMapOf<String, EpgGuide>()
+    private var epgRefreshInProgress = false
     private val cloudCategories = mutableListOf<String>()
     // Le cartelle restano chiuse all’apertura; l’espansione è condivisa tra lista e drawer fullscreen.
     private val expandedCategoryPaths = mutableSetOf<String>()
@@ -494,10 +496,11 @@ class MainActivity : Activity() {
             val name = item.optString("name").trim()
             val url = item.optString("url").trim()
             if (name.isNotBlank() && (url.startsWith("http://", true) || url.startsWith("https://", true))) {
-                cloudChannels.add(CloudChannel(name, url, item.optString("logo"), item.optString("category").ifBlank { "Non classificati" }))
+                cloudChannels.add(CloudChannel(name, url, item.optString("logo"), item.optString("category").ifBlank { "Non classificati" }, item.optString("tvgId"), item.optString("tvgName")))
             }
         }
         renderCloudChannels()
+        refreshEpgIfNeeded()
     }
 
     private fun renderCloudChannels() {
@@ -704,6 +707,22 @@ class MainActivity : Activity() {
             ellipsize = android.text.TextUtils.TruncateAt.END
         }
         labels.addView(name)
+        epgGuides[channel.url]?.let { guide ->
+            val lines = mutableListOf<String>()
+            if (guide.nowTitle.isNotBlank()) {
+                val times = if (guide.nowStartMs > 0L && guide.nowStopMs > 0L) EpgGuideManager.formatTime(guide.nowStartMs) + "–" + EpgGuideManager.formatTime(guide.nowStopMs) else ""
+                lines.add("ORA" + (if (times.isBlank()) "" else "  " + times) + "  ·  " + guide.nowTitle)
+            }
+            if (guide.nextTitle.isNotBlank()) lines.add("DOPO  ·  " + guide.nextTitle)
+            if (lines.isNotEmpty()) labels.addView(TextView(this).apply {
+                text = lines.joinToString("\n")
+                setTextColor(Color.rgb(126, 174, 199))
+                textSize = if (isTvDevice()) 11f else 10f
+                maxLines = 2
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                setPadding(0, dp(3), 0, 0)
+            })
+        }
         row.addView(labels, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
 
         // Lo stato di riproduzione è visibile nel video, non nella lista dei canali.
@@ -888,6 +907,34 @@ class MainActivity : Activity() {
                             "Offline: uso la lista autorizzata fino alla scadenza della licenza."
                         }
                     }
+                }
+            }
+        }
+    }
+
+    private fun refreshEpgIfNeeded(force: Boolean = false) {
+        if (cloudChannels.isEmpty() || epgRefreshInProgress) return
+        epgGuides.clear()
+        epgGuides.putAll(EpgGuideManager.readCached(this))
+        if (!force && !EpgGuideManager.shouldRefresh(this)) {
+            if (epgGuides.isNotEmpty()) renderCloudChannels()
+            return
+        }
+        epgRefreshInProgress = true
+        val snapshot = cloudChannels.map { EpgChannelInput(it.name, it.url, it.tvgId, it.tvgName) }
+        cloudExecutor.execute {
+            val result = runCatching { EpgGuideManager.refresh(this@MainActivity, snapshot) }
+            runOnUiThread {
+                epgRefreshInProgress = false
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                result.onSuccess { refreshed ->
+                    epgGuides.clear()
+                    epgGuides.putAll(refreshed.guides)
+                    renderCloudChannels()
+                    cloudStatusView.text = "EPG aggiornato · " + refreshed.matchedCount + "/" + snapshot.size + " canali associati · " + refreshed.sourceLabel
+                }.onFailure { error ->
+                    if (epgGuides.isNotEmpty()) renderCloudChannels()
+                    cloudStatusView.text = "EPG non aggiornato: " + (error.message ?: "fonte non raggiungibile") + ". Mantengo la guida salvata."
                 }
             }
         }

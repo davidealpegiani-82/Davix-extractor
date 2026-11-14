@@ -9,6 +9,8 @@ type Channel = {
   url: string;
   logo?: string;
   category?: string;
+  tvgId?: string;
+  tvgName?: string;
   headers?: Record<string, string>;
   expiry?: string | null;
 };
@@ -80,6 +82,8 @@ function validChannel(channel: any): channel is Channel {
   } catch { return false; }
   if (channel.logo != null && (typeof channel.logo !== "string" || channel.logo.length > 4096)) return false;
   if (channel.category != null && (typeof channel.category !== "string" || channel.category.trim().length === 0 || channel.category.length > 80)) return false;
+  if (channel.tvgId != null && (typeof channel.tvgId !== "string" || channel.tvgId.length > 256)) return false;
+  if (channel.tvgName != null && (typeof channel.tvgName !== "string" || channel.tvgName.length > 160)) return false;
   if (channel.headers != null && (typeof channel.headers !== "object" || Array.isArray(channel.headers))) return false;
   return true;
 }
