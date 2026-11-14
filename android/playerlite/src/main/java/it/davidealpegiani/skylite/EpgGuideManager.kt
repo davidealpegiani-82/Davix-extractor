@@ -23,6 +23,7 @@ internal object EpgGuideManager {
     private const val LAST_SYNC = "last_sync"
     private const val GUIDE_CACHE = "guide_cache"
     private const val MATCH_CACHE = "match_cache"
+    private const val CHANNEL_SIGNATURE = "channel_signature"
     private const val REFRESH_INTERVAL_MS = 6L * 60L * 60L * 1000L
     private val sources = listOf(
         "IPTV-EPG Italia" to "https://iptv-epg.org/files/epg-it.xml.gz",
@@ -31,8 +32,13 @@ internal object EpgGuideManager {
     private data class Program(val start: Long, val stop: Long, val title: String)
     private data class Dataset(val channelNames: Map<String, List<String>>, val programs: Map<String, List<Program>>)
 
-    fun shouldRefresh(context: Context): Boolean =
-        System.currentTimeMillis() - context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getLong(LAST_SYNC, 0L) >= REFRESH_INTERVAL_MS
+    fun shouldRefresh(context: Context, channels: List<EpgChannelInput>): Boolean {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val signature = channels.map { normalize(it.tvgId) + "|" + normalize(it.tvgName.ifBlank { it.name }) }
+            .sorted().joinToString("\n")
+        return System.currentTimeMillis() - prefs.getLong(LAST_SYNC, 0L) >= REFRESH_INTERVAL_MS ||
+            prefs.getString(CHANNEL_SIGNATURE, null) != signature
+    }
 
     fun formatTime(value: Long): String = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(value))
 
@@ -101,7 +107,10 @@ internal object EpgGuideManager {
         result.forEach { (url, guide) ->
             cache.put(url, JSONObject().put("now", guide.nowTitle).put("next", guide.nextTitle).put("start", guide.nowStartMs).put("stop", guide.nowStopMs).put("id", guide.epgId))
         }
-        prefs.edit().putString(GUIDE_CACHE, cache.toString()).putString(MATCH_CACHE, newMatches.toString()).putLong(LAST_SYNC, now).apply()
+        val signature = channels.map { normalize(it.tvgId) + "|" + normalize(it.tvgName.ifBlank { it.name }) }
+            .sorted().joinToString("\n")
+        prefs.edit().putString(GUIDE_CACHE, cache.toString()).putString(MATCH_CACHE, newMatches.toString())
+            .putString(CHANNEL_SIGNATURE, signature).putLong(LAST_SYNC, now).apply()
         return EpgRefreshResult(result, matched, usedSources.joinToString(" + ").ifBlank { "fonti XMLTV" })
     }
 

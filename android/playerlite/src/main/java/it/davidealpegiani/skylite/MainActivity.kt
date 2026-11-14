@@ -916,12 +916,12 @@ class MainActivity : Activity() {
         if (cloudChannels.isEmpty() || epgRefreshInProgress) return
         epgGuides.clear()
         epgGuides.putAll(EpgGuideManager.readCached(this))
-        if (!force && !EpgGuideManager.shouldRefresh(this)) {
+        val snapshot = cloudChannels.map { EpgChannelInput(it.name, it.url, it.tvgId, it.tvgName) }
+        if (!force && !EpgGuideManager.shouldRefresh(this, snapshot)) {
             if (epgGuides.isNotEmpty()) renderCloudChannels()
             return
         }
         epgRefreshInProgress = true
-        val snapshot = cloudChannels.map { EpgChannelInput(it.name, it.url, it.tvgId, it.tvgName) }
         cloudExecutor.execute {
             val result = runCatching { EpgGuideManager.refresh(this@MainActivity, snapshot) }
             runOnUiThread {
