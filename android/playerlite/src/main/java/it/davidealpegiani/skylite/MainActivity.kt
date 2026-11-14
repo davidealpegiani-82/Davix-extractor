@@ -119,6 +119,7 @@ class MainActivity : Activity() {
     private lateinit var topBar: LinearLayout
     private lateinit var cloudHeaderView: TextView
     private lateinit var channelsHeaderView: TextView
+    private lateinit var fullscreenDrawerHeader: TextView
     private val cloudHandler = Handler(Looper.getMainLooper())
     private val cloudExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
     private val cloudChannels = mutableListOf<CloudChannel>()
@@ -414,7 +415,7 @@ class MainActivity : Activity() {
             descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
             layoutParams = FrameLayout.LayoutParams(dp(420), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.START)
         }
-        val drawerHeader = TextView(this).apply {
+        fullscreenDrawerHeader = TextView(this).apply {
             text = "  CANALI  ·  SELEZIONA"
             contentDescription = "Chiudi elenco canali"
             textSize = 18f
@@ -428,7 +429,7 @@ class MainActivity : Activity() {
             setOnFocusChangeListener { _, focused -> background = channelActionBackground(focused) }
             setOnClickListener { closeFullscreenChannelDrawer() }
         }
-        fullscreenChannelDrawer.addView(drawerHeader, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(68)))
+        fullscreenChannelDrawer.addView(fullscreenDrawerHeader, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(68)))
         val drawerScroll = ScrollView(this).apply {
             isFillViewport = true
             isFocusable = false
@@ -502,6 +503,7 @@ class MainActivity : Activity() {
     private fun renderCloudChannels() {
         if (!::channelsList.isInitialized) return
         channelsList.removeAllViews()
+        updateStickyCategoryHeader()
         if (cloudChannels.isEmpty()) {
             if (isTvDevice() && !PlayerCloudSync.hasValidLease(this)) activationCodeInput.post { activationCodeInput.requestFocus() }
             val empty = TextView(this).apply {
@@ -598,7 +600,15 @@ class MainActivity : Activity() {
                 }
             }
             setOnClickListener {
-                if (!expandedCategoryPaths.add(key)) expandedCategoryPaths.remove(key)
+                if (key in expandedCategoryPaths) {
+                    expandedCategoryPaths.remove(key)
+                } else {
+                    // Una sola cartella aperta alla volta: il titolo fisso identifica sempre
+                    // la lista di canali che si sta scorrendo.
+                    expandedCategoryPaths.clear()
+                    expandedCategoryPaths.add(key)
+                }
+                updateStickyCategoryHeader()
                 renderCloudChannels()
                 if (isTvDevice()) {
                     val container = if (isCompact) fullscreenChannelList else channelsList
@@ -613,6 +623,22 @@ class MainActivity : Activity() {
         })
         if (expanded) {
             items.forEach { channel -> addChannelItem(target, channel, isCompact) }
+        }
+    }
+
+    private fun updateStickyCategoryHeader() {
+        val activeKey = expandedCategoryPaths.lastOrNull()
+        val title = when {
+            activeKey == null -> "I TUOI CANALI"
+            activeKey == "special:favorites" -> "★ PREFERITI"
+            activeKey == "special:uncategorized" -> "DA CLASSIFICARE"
+            activeKey.startsWith("category:") -> activeKey.removePrefix("category:").uppercase()
+            else -> "I TUOI CANALI"
+        }
+        if (::channelsHeaderView.isInitialized) channelsHeaderView.text = title
+        if (::fullscreenDrawerHeader.isInitialized) {
+            fullscreenDrawerHeader.text = "  $title  ·  SELEZIONA"
+            fullscreenDrawerHeader.contentDescription = "Elenco $title. Premi per chiudere"
         }
     }
 
@@ -664,20 +690,7 @@ class MainActivity : Activity() {
         row.addView(accent, LinearLayout.LayoutParams(dp(4), ViewGroup.LayoutParams.MATCH_PARENT).apply {
             rightMargin = dp(12)
         })
-        val logo = TextView(this).apply {
-            text = channel.name.trim().firstOrNull()?.uppercase() ?: "▶"
-            gravity = Gravity.CENTER
-            textSize = if (isTvDevice()) 18f else 15f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            setTextColor(if (selected) Color.rgb(0, 212, 255) else Color.rgb(205, 225, 238))
-            background = android.graphics.drawable.GradientDrawable().apply {
-                shape = android.graphics.drawable.GradientDrawable.OVAL
-                setColor(if (selected) Color.rgb(14, 56, 73) else Color.rgb(29, 43, 61))
-                setStroke(dp(1), if (selected) Color.rgb(0, 160, 195) else Color.rgb(57, 82, 108))
-            }
-        }
-        row.addView(logo, LinearLayout.LayoutParams(dp(44), dp(44)).apply { rightMargin = dp(14) })
-
+        // Lista essenziale: niente logo/iniziale e nessuna etichetta LIVE.
         val labels = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_VERTICAL
@@ -690,33 +703,10 @@ class MainActivity : Activity() {
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
         }
-        val subtitle = TextView(this).apply {
-            text = if (selected) "IN RIPRODUZIONE" else "CANALE LIVE"
-            setTextColor(if (selected) Color.rgb(0, 190, 220) else Color.rgb(132, 153, 174))
-            textSize = 10f
-            letterSpacing = 0.10f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            setPadding(0, dp(3), 0, 0)
-        }
         labels.addView(name)
-        labels.addView(subtitle)
         row.addView(labels, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
 
-        val live = TextView(this).apply {
-            text = if (selected) "ON AIR" else "LIVE"
-            gravity = Gravity.CENTER
-            setTextColor(if (selected) Color.rgb(4, 18, 26) else Color.rgb(135, 205, 221))
-            textSize = 10f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            letterSpacing = 0.06f
-            setPadding(dp(10), dp(6), dp(10), dp(6))
-            background = android.graphics.drawable.GradientDrawable().apply {
-                cornerRadius = dp(12).toFloat()
-                setColor(if (selected) Color.rgb(0, 212, 255) else Color.rgb(22, 54, 69))
-                setStroke(dp(1), if (selected) Color.rgb(0, 212, 255) else Color.rgb(45, 105, 128))
-            }
-        }
-        row.addView(live, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        // Lo stato di riproduzione è visibile nel video, non nella lista dei canali.
         val favorite = TextView(this).apply {
             tag = "favorite:${channel.url}"
             text = if (channel.url in favoriteUrls) "★" else "☆"
