@@ -67,15 +67,15 @@ function render(){
  channels.forEach((c,i)=>{
   const el=document.createElement('div');el.className='item';
   const check=document.createElement('input');check.type='checkbox';check.checked=selected.has(i);check.setAttribute('aria-label','Esporta '+c.name);
-  check.addEventListener('change',()=>{if(check.checked)selected.add(i);else selected.delete(i);updateControls()});
+  check.addEventListener('change',()=>{if(check.checked)selected.add(i);else selected.delete(i);persistLibrary();updateControls()});
   const play=document.createElement('button');play.type='button';play.className='play-channel';play.textContent='▶  '+c.name+(c.source?'  ·  '+c.source:'');play.addEventListener('click',()=>playChannel(i));
   el.append(check,play);$('list').append(el);
  });
  updateControls();
 }
-$('selectAll').onclick=()=>{selected=new Set(channels.map((_,i)=>i));render()};
+$('selectAll').onclick=()=>{selected=new Set(channels.map((_,i)=>i));persistLibrary();render()};
 $('clearAll').onclick=()=>{selected.clear();persistLibrary();render()};
-$('replaceList').onclick=()=>{if(!confirm('Vuoi svuotare definitivamente l’archivio locale dei canali e caricare una nuova lista? Questa operazione non è annullabile.'))return;clearPreviewTimers();if(previewHls){try{previewHls.destroy()}catch(e){}previewHls=null}const v=$('preview');v.pause();v.removeAttribute('src');v.load();channels=[];selected.clear();activeIndex=-1;localStorage.removeItem(STORAGE_KEY);render();$('playing').textContent='Archivio svuotato. Ora puoi caricare una nuova lista.';$('status').textContent='Archivio locale eliminato.';$('savedState').textContent='Archivio locale vuoto.'};
+$('replaceList').onclick=()=>{if(!confirm('Vuoi svuotare definitivamente l’archivio locale dei canali e caricare una nuova lista? Questa operazione non è annullabile.'))return;clearPreviewTimers();if(previewHls){try{previewHls.destroy()}catch(e){}previewHls=null}const v=$('preview');v.pause();v.removeAttribute('src');v.load();channels=[];selected.clear();activeIndex=-1;localStorage.removeItem(STORAGE_KEY);render();$('playing').textContent='Archivio svuotato. Ora puoi caricare una nuova lista.';$('status').textContent='Archivio locale eliminato.';$('savedState').textContent='Archivio locale vuoto.';$('file').click()};
 let previewRetryTimer=null,previewWatchdog=null,previewStableTimer=null,previewRetries=0,previewLastTime=0,previewLastProgress=Date.now();
 const previewRetryDelays=[1000,2000,4000,8000,12000,15000];
 function clearPreviewTimers(){
