@@ -123,6 +123,8 @@ class MainActivity : Activity() {
     private val cloudExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
     private val cloudChannels = mutableListOf<CloudChannel>()
     private val cloudCategories = mutableListOf<String>()
+    // Le cartelle restano chiuse all’apertura; l’espansione è condivisa tra lista e drawer fullscreen.
+    private val expandedCategoryPaths = mutableSetOf<String>()
     private val favoriteUrls = mutableSetOf<String>()
     private val playerPrefs by lazy { getSharedPreferences("davix_player_preferences", MODE_PRIVATE) }
     private var lastAuthorizationCheckAt = 0L
@@ -513,8 +515,7 @@ class MainActivity : Activity() {
         addGroupedChannelSections(channelsList, isCompact = false)
         renderFullscreenChannelList()
         if (isTvDevice()) {
-            val selectedUrl = selectedChannelForRecovery?.url ?: cloudChannels.firstOrNull()?.url
-            channelsList.post { selectedUrl?.let { channelsList.findViewWithTag<View>(it)?.requestFocus() } }
+            channelsList.post { channelsList.getChildAt(0)?.requestFocus() }
         }
     }
 
@@ -531,48 +532,85 @@ class MainActivity : Activity() {
     }
 
     private fun addGroupedChannelSections(target: LinearLayout, isCompact: Boolean) {
-        val favorites = cloudChannels.filter { it.url in favoriteUrls }
-        if (favorites.isNotEmpty()) {
-            addSectionHeading(target, "★ Preferiti", isCompact)
-            favorites.forEach { channel -> addChannelItem(target, channel, isCompact) }
-        }
-
-        // Le categorie gerarchiche arrivano come percorsi "Sezione > Sottosezione".
-        // Il player mantiene compatibilità con le vecchie categorie piatte.
-        val orderedPaths = (cloudCategories + cloudChannels.map { it.category })
+        // La schermata iniziale mostra esclusivamente cartelle. I canali compaiono
+        // soltanto dopo l'apertura della relativa tipologia.
+        val paths = (cloudCategories + cloudChannels.map { it.category })
             .map { it.split(">").map(String::trim).filter(String::isNotBlank).joinToString(" > ") }
-            .filter { it.isNotBlank() }.distinct()
-        val roots = orderedPaths.map { it.substringBefore(" > ") }.distinct()
+            .filter { it.isNotBlank() && !it.equals("Non classificati", true) }
+            .distinct()
+            .filter { path -> cloudChannels.any { it.category.trim().equals(path, true) } }
+            .sortedBy { it.lowercase() }
         val rendered = mutableSetOf<String>()
 
-        roots.forEach { root ->
-            val rootItems = cloudChannels.filter { it.category.trim().equals(root, true) }
-            val childPaths = orderedPaths.filter { it.startsWith("$root > ", true) }
-                .sortedBy { it.lowercase() }
-            val childItemsExist = childPaths.any { path ->
-                cloudChannels.any { it.category.trim().equals(path, true) }
-            }
-            if (rootItems.isNotEmpty() || childItemsExist) {
-                addSectionHeading(target, root, isCompact)
-                rootItems.forEach { addChannelItem(target, it, isCompact) }
-                rendered.addAll(rootItems.map { it.url })
-                childPaths.forEach { path ->
-                    val items = cloudChannels.filter { it.category.trim().equals(path, true) }
-                    if (items.isNotEmpty()) {
-                        val depth = path.split(">").size - 1
-                        val leaf = path.substringAfterLast(">").trim()
-                        addSectionHeading(target, ("›  ".repeat(depth)) + leaf, isCompact)
-                        items.forEach { addChannelItem(target, it, isCompact) }
-                        rendered.addAll(items.map { it.url })
-                    }
-                }
+        val favorites = cloudChannels.filter { it.url in favoriteUrls }
+        if (favorites.isNotEmpty()) {
+            addCategoryFolder(target, "★ Preferiti", "special:favorites", favorites, isCompact)
+            rendered.addAll(favorites.map { it.url })
+        }
+
+        paths.forEach { path ->
+            val items = cloudChannels.filter { it.category.trim().equals(path, true) && it.url !in rendered }
+            if (items.isNotEmpty()) {
+                addCategoryFolder(target, path, "category:$path", items, isCompact)
+                rendered.addAll(items.map { it.url })
             }
         }
 
         val uncategorized = cloudChannels.filter { it.url !in rendered }
         if (uncategorized.isNotEmpty()) {
-            addSectionHeading(target, "Non classificati", isCompact)
-            uncategorized.forEach { channel -> addChannelItem(target, channel, isCompact) }
+            addCategoryFolder(target, "Da classificare", "special:uncategorized", uncategorized, isCompact)
+        }
+    }
+
+    private fun addCategoryFolder(
+        target: LinearLayout,
+        title: String,
+        key: String,
+        items: List<CloudChannel>,
+        isCompact: Boolean
+    ) {
+        val expanded = key in expandedCategoryPaths
+        val folder = TextView(this).apply {
+            text = (if (expanded) "▾  " else "▸  ") + title.uppercase() + "    ·  " + items.size
+            setTextColor(Color.rgb(226, 241, 252))
+            textSize = if (isTvDevice()) 14f else 13f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            letterSpacing = 0.035f
+            gravity = Gravity.CENTER_VERTICAL
+            minHeight = dp(if (isTvDevice()) 66 else 54)
+            setPadding(dp(16), dp(10), dp(14), dp(10))
+            isFocusable = true
+            isFocusableInTouchMode = !isTvDevice()
+            isClickable = true
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(if (expanded) Color.rgb(17, 54, 72) else Color.rgb(15, 32, 51))
+                cornerRadius = dp(13).toFloat()
+                setStroke(dp(if (hasFocus()) 2 else 1), if (hasFocus()) Color.rgb(0, 212, 255) else Color.rgb(43, 76, 103))
+            }
+            contentDescription = "${if (expanded) "Chiudi" else "Apri"} cartella $title, ${items.size} canali"
+            setOnFocusChangeListener { view, focused ->
+                view.background = android.graphics.drawable.GradientDrawable().apply {
+                    setColor(if (expanded) Color.rgb(17, 54, 72) else Color.rgb(15, 32, 51))
+                    cornerRadius = dp(13).toFloat()
+                    setStroke(dp(if (focused) 3 else 1), if (focused) Color.rgb(0, 212, 255) else Color.rgb(43, 76, 103))
+                }
+            }
+            setOnClickListener {
+                if (!expandedCategoryPaths.add(key)) expandedCategoryPaths.remove(key)
+                renderCloudChannels()
+                if (isTvDevice()) {
+                    val container = if (isCompact) fullscreenChannelList else channelsList
+                    container.post { container.findViewWithTag<View>("folder:$key")?.requestFocus() }
+                }
+            }
+            tag = "folder:$key"
+        }
+        target.addView(folder, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            topMargin = dp(if (isCompact) 5 else 7)
+            bottomMargin = dp(4)
+        })
+        if (expanded) {
+            items.forEach { channel -> addChannelItem(target, channel, isCompact) }
         }
     }
 
@@ -741,9 +779,7 @@ class MainActivity : Activity() {
             fullscreenChannelDrawer.visibility = View.VISIBLE
             fullscreenChannelsButton.visibility = View.GONE
             fullscreenChannelDrawer.post {
-                val firstUrl = cloudChannels.firstOrNull()?.url
-                val firstChannel = firstUrl?.let { fullscreenChannelList.findViewWithTag<View>(it) }
-                (firstChannel ?: fullscreenChannelDrawer.getChildAt(0))?.requestFocus()
+                fullscreenChannelDrawer.getChildAt(0)?.requestFocus()
             }
         }
     }
