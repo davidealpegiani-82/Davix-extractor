@@ -441,7 +441,7 @@ class MainActivity : Activity() {
             setPadding(dp(12), dp(10), dp(12), dp(20))
         }
         drawerScroll.addView(fullscreenChannelList)
-        drawerScroll.setOnScrollChangeListener { view: ScrollView, _, scrollY, _, _ ->
+        drawerScroll.setOnScrollChangeListener { view: View, _, scrollY, _, _ ->
             updateStickyCategoryHeaderFromScroll(fullscreenChannelList, scrollY)
         }
         fullscreenChannelDrawer.addView(drawerScroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
@@ -463,7 +463,7 @@ class MainActivity : Activity() {
             setPadding(dp(12), dp(8), dp(12), dp(12))
         }
         channelScroll.addView(channelsList)
-        channelScroll.setOnScrollChangeListener { view: ScrollView, _, scrollY, _, _ ->
+        channelScroll.setOnScrollChangeListener { view: View, _, scrollY, _, _ ->
             updateStickyCategoryHeaderFromScroll(channelsList, scrollY)
         }
         if (tvMode) controls.addView(channelScroll) else root.addView(channelScroll)
