@@ -93,9 +93,12 @@ assert.match(lite, /KEYCODE_MEDIA_PLAY_PAUSE/, 'Play/Pause remote key must toggl
 assert.match(lite, /KEYCODE_MEDIA_PLAY/, 'Play remote key must start playback');
 assert.match(lite, /KEYCODE_MEDIA_PAUSE/, 'Pause remote key must pause playback');
 assert.match(lite, /Elenco canali\. Usa le frecce per scegliere e OK per riprodurre\./, 'TV channel list must explain D-pad and OK navigation');
-assert.match(lite, /val selectedUrl = selectedChannelForRecovery\?\.url \?: cloudChannels\.firstOrNull\(\)\?\.url[\s\S]*?channelsList\.post \{ selectedUrl\?\.let \{ channelsList\.findViewWithTag<View>\(it\)\?\.requestFocus\(\) \} \}/, 'TV channel list must focus the selected channel, falling back to the first item despite category headings');
+assert.match(lite, /channelsList\.post \{ channelsList\.getChildAt\(0\)\?\.requestFocus\(\) \}/, 'TV channel list must focus the first category folder');
 assert.match(lite, /focusBeforeFullscreen[\s\S]*target\.post \{ target\.requestFocus\(\) \}/, 'leaving fullscreen must restore the previous TV focus target');
-assert.match(lite, /fullscreenChannelDrawer\.post \{[\s\S]*firstChannel[\s\S]*requestFocus\(\)/, 'opening the fullscreen channel drawer must focus its first item');
+assert.match(lite, /fullscreenChannelDrawer\.post \{[\s\S]*fullscreenChannelList\.getChildAt\(0\)\?\.requestFocus\(\)/, 'opening the fullscreen channel drawer must focus the first category folder');
+assert.match(lite, /private val expandedCategoryPaths = mutableSetOf<String>\(\)/, 'Player Lite folders must start collapsed');
+assert.match(lite, /addCategoryFolder\(/, 'Player Lite must render categories as expandable folders');
+assert.match(lite, /expandedCategoryPaths\.add\(key\)/, 'Player Lite folders must toggle open and closed');
 assert.match(liteManifest, /LEANBACK_LAUNCHER/, 'Player Lite must be discoverable by Android TV launchers');
 assert.match(web, /android\/app\/src\/main\/assets\/player-template\.html/, 'web exporter must use the same template');
 assert.match(web, /async function playerHtml\(/);
