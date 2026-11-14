@@ -899,7 +899,7 @@ class MainActivity : FragmentActivity() {
             ).apply { bottomMargin = dp(6) })
         }
 
-        addDestination("Mantieni i gruppi originali della playlist", "Non modificare i group-title presenti nel file.") {
+        addDestination("Classifica automaticamente per tipologia", "Usa nome canale e group-title per creare cartelle e sottocartelle tematiche.") {
             pendingImportCategory = null
             openPicker()
         }
