@@ -835,21 +835,94 @@ class MainActivity : FragmentActivity() {
     }
 
     private fun showImportDestinationDialog() {
-        val options = listOf("Mantieni i gruppi originali della playlist") +
-            categories.filter { it != "Non classificati" } +
-            "＋  Crea nuova sezione o sottocartella…"
-        AlertDialog.Builder(this)
+        // Dialog personalizzato: setMessage() + setItems() sui dialog standard
+        // può comprimere/nascondere l'elenco su alcuni temi e dispositivi Android.
+        // La lista viene costruita esplicitamente e resta sempre scorrevole.
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(4), dp(20), dp(4))
+        }
+        val description = TextView(this).apply {
+            text = "Scegli la sezione in cui inserire i canali. Puoi conservare i gruppi originali della playlist oppure assegnare tutti i canali a una destinazione."
+            textSize = 13f
+            setTextColor(MUTED)
+            setPadding(0, 0, 0, dp(10))
+        }
+        content.addView(description)
+
+        val choices = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val scrollChoices = ScrollView(this).apply {
+            isFillViewport = true
+            addView(choices)
+        }
+        content.addView(scrollChoices, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, dp(320)
+        ))
+
+        val dialog = AlertDialog.Builder(this)
             .setTitle("Destinazione dell'importazione")
-            .setMessage("Scegli dove inserire i canali. Puoi mantenere i group-title originali oppure assegnare tutto a una sezione.")
-            .setItems(options.toTypedArray()) { _, which ->
-                when {
-                    which == 0 -> { pendingImportCategory = null; openPicker() }
-                    which == options.lastIndex -> promptNewCategoryForImport()
-                    else -> { pendingImportCategory = options[which]; openPicker() }
+            .setView(content)
+            .setNegativeButton("Annulla", null)
+            .create()
+
+        fun addDestination(label: String, detail: String? = null, action: () -> Unit) {
+            val item = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(12), dp(8), dp(12), dp(8))
+                setBackgroundColor(PANEL)
+                isClickable = true
+                isFocusable = true
+                setOnClickListener {
+                    dialog.dismiss()
+                    action()
                 }
             }
-            .setNegativeButton("Annulla", null)
-            .show()
+            val title = TextView(this).apply {
+                text = label
+                textSize = 14f
+                setTextColor(Color.WHITE)
+                setTypeface(null, android.graphics.Typeface.BOLD)
+            }
+            item.addView(title)
+            if (!detail.isNullOrBlank()) {
+                item.addView(TextView(this).apply {
+                    text = detail
+                    textSize = 11f
+                    setTextColor(MUTED)
+                })
+            }
+            choices.addView(item, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = dp(6) })
+        }
+
+        addDestination("Mantieni i gruppi originali della playlist", "Non modificare i group-title presenti nel file.") {
+            pendingImportCategory = null
+            openPicker()
+        }
+
+        val available = categories
+            .filter { it.isNotBlank() }
+            .distinctBy { it.lowercase(Locale.ROOT) }
+            .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it })
+        if (available.isEmpty()) {
+            addDestination("Nessuna sezione disponibile", "Crea una nuova sezione per continuare.") { promptNewCategoryForImport() }
+        } else {
+            available.forEach { category ->
+                val depth = category.split(">").size - 1
+                val shown = if (depth > 0) ("   ".repeat(depth)) + "↳ " + category.substringAfterLast(">") .trim() else category
+                addDestination(shown, if (depth > 0) "Sottocartella · $category" else "Sezione") {
+                    pendingImportCategory = category
+                    openPicker()
+                }
+            }
+        }
+
+        addDestination("＋  Crea nuova sezione o sottocartella", "Esempio: Intrattenimento > Cinema") {
+            promptNewCategoryForImport()
+        }
+        dialog.show()
     }
 
     private fun promptNewCategoryForImport() {
