@@ -96,9 +96,11 @@ assert.match(lite, /Elenco canali\. Usa le frecce per scegliere e OK per riprodu
 assert.match(lite, /channelsList\.post \{ channelsList\.getChildAt\(0\)\?\.requestFocus\(\) \}/, 'TV channel list must focus the first category folder');
 assert.match(lite, /focusBeforeFullscreen[\s\S]*target\.post \{ target\.requestFocus\(\) \}/, 'leaving fullscreen must restore the previous TV focus target');
 assert.match(lite, /fullscreenChannelDrawer\.post \{[\s\S]*fullscreenChannelList\.getChildAt\(0\)\?\.requestFocus\(\)/, 'opening the fullscreen channel drawer must focus the first category folder');
-assert.match(lite, /private val expandedCategoryPaths = mutableSetOf<String>\(\)/, 'Player Lite folders must start collapsed');
-assert.match(lite, /addCategoryFolder\(/, 'Player Lite must render categories as expandable folders');
-assert.match(lite, /expandedCategoryPaths\.add\(key\)/, 'Player Lite folders must toggle open and closed');
+assert.match(lite, /private var stickyCategoryKey: String\? = null/, 'Player Lite must track the active sticky category');
+assert.match(lite, /addCategoryFolder\(/, 'Player Lite must render category sections');
+assert.match(lite, /val expanded = true/, 'Player Lite must keep all category sections visible');
+assert.match(lite, /private fun updateStickyCategoryHeaderFromScroll\(/, 'Player Lite must update the pinned category header while scrolling');
+assert.match(lite, /folder:\\"\s*\+\s*key|tag\s*=\s*\\"folder:\\$key\\"/, 'Each category heading must be identifiable by the scroll tracker');
 assert.match(liteManifest, /LEANBACK_LAUNCHER/, 'Player Lite must be discoverable by Android TV launchers');
 assert.match(web, /android\/app\/src\/main\/assets\/player-template\.html/, 'web exporter must use the same template');
 assert.match(web, /async function playerHtml\(/);
