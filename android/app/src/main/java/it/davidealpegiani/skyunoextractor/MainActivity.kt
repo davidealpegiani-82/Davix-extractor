@@ -71,6 +71,8 @@ class MainActivity : FragmentActivity() {
     // Selezione multipla separata dalla selezione di esportazione.
     private var bulkSelectionMode = false
     private val bulkSelectedIndices = mutableSetOf<Int>()
+    // Le cartelle sono chiuse per impostazione predefinita: niente liste chilometriche.
+    private val expandedCategoryPaths = mutableSetOf<String>()
     // null = conserva i group-title originali della playlist.
     private var pendingImportCategory: String? = null
     private lateinit var mainContainer: LinearLayout
@@ -897,7 +899,7 @@ class MainActivity : FragmentActivity() {
             ).apply { bottomMargin = dp(6) })
         }
 
-        addDestination("Mantieni i gruppi originali della playlist", "Non modificare i group-title presenti nel file.") {
+        addDestination("Classifica automaticamente per tipologia", "Usa nome canale e group-title per creare cartelle e sottocartelle tematiche.") {
             pendingImportCategory = null
             openPicker()
         }
@@ -945,6 +947,48 @@ class MainActivity : FragmentActivity() {
             }.show()
     }
 
+
+    /**
+     * Trasforma group-title e nome canale in un percorso gerarchico coerente.
+     * Le regole sono volutamente conservative: ciò che non è riconoscibile
+     * finisce in "Da classificare", senza essere assegnato a una categoria casuale.
+     */
+    private fun inferCategoryPath(channel: TvChannel): String {
+        val source = "${channel.name} ${channel.category}".lowercase(Locale.ROOT)
+            .replace('_', ' ').replace('-', ' ')
+        fun has(vararg terms: String) = terms.any { source.contains(it) }
+
+        val rules = listOf(
+            "Sport > Calcio" to arrayOf("calcio", "football", "soccer", "serie a", "serie b", "champions", "europa league", "conference league", "premier league", "liga", "bundesliga", "ligue 1", "coppa italia", "mondiale", "europei"),
+            "Sport > Motori" to arrayOf("formula 1", "formula1", "f1", "motogp", "moto gp", "superbike", "wrc", "rally", "motori", "nascar"),
+            "Sport > Tennis" to arrayOf("tennis", "atp", "wta", "roland garros", "wimbledon"),
+            "Sport > Basket" to arrayOf("basket", "basketball", "nba", "euroleague"),
+            "Sport > Altri sport" to arrayOf("sport", "dazn", "eurosport", "sky sport", "sportitalia", "golf", "rugby", "volley", "pallavolo", "ciclismo", "cycling", "olimpiadi"),
+            "Cinema > Cinema italiano" to arrayOf("cinema italiano", "film italiani"),
+            "Cinema > Cinema internazionale" to arrayOf("cinema", "sky cinema", "paramount", "film", "movies", "movie", "premiere", "action", "thriller", "comedy"),
+            "Serie TV > Serie italiane" to arrayOf("serie italian", "fiction", "rai fiction"),
+            "Serie TV > Serie internazionali" to arrayOf("serie tv", "series", "tv series", "drama", "crime", "investigation", "fox", "hbo", "amc"),
+            "Documentari > Natura" to arrayOf("natura", "animal", "wild", "discovery", "national geographic", "nat geo", "wildlife"),
+            "Documentari > Storia e Scienza" to arrayOf("history", "storia", "science", "scienza", "focus", "documentar"),
+            "Bambini > Cartoni animati" to arrayOf("cartoon", "cartoni", "boing", "k2", "nick", "nickelodeon", "cartoonito", "disney junior"),
+            "Bambini > Ragazzi" to arrayOf("disney channel", "teen", "ragazzi", "kids", "baby tv"),
+            "News > Italiane" to arrayOf("tg", "rai news", "sky tg", "tgcom", "la7 news", "all news"),
+            "News > Internazionali" to arrayOf("bbc news", "cnn", "fox news", "al jazeera", "france 24", "dw news", "euronews"),
+            "Musica > Canali musicali" to arrayOf("music", "musica", "mtv", "radio", "concert"),
+            "Intrattenimento > Generalisti" to arrayOf("rai 1", "rai 2", "rai 3", "canale 5", "italia 1", "rete 4", "la7", "nove", "tv8", "real time", "dmax"),
+            "Intrattenimento > Reality e Show" to arrayOf("reality", "show", "talent", "masterchef", "amici", "gf", "grande fratello", "x factor", "talk")
+        )
+        for ((path, terms) in rules) if (has(*terms)) return path
+
+        val knownPath = normalizeCategoryPath(channel.category)
+        if (knownPath.contains(" > ")) return knownPath
+        return when {
+            has("intrattenimento", "entertainment") -> "Intrattenimento > Altri programmi"
+            has("xxx", "adult") -> "XXX > Adult"
+            else -> "Da classificare"
+        }
+    }
+
     private fun importUris(uris: List<Uri>) {
         var added = 0
         var duplicates = 0
@@ -959,6 +1003,14 @@ class MainActivity : FragmentActivity() {
                 pendingImportCategory?.let { destination ->
                     found.forEach { it.category = destination }
                     if (destination !in categories) categories.add(destination)
+                } ?: run {
+                    found.forEach { channel ->
+                        // Le categorie manuali già salvate restano intatte.
+                        val savedManualPath = normalizeCategoryPath(channel.category)
+                        val inferred = inferCategoryPath(channel)
+                        channel.category = if (savedManualPath.contains(" > ") && savedManualPath in categories) savedManualPath else inferred
+                        if (channel.category !in categories) categories.add(channel.category)
+                    }
                 }
                 if (found.isEmpty()) {
                     invalid++
@@ -1236,8 +1288,60 @@ class MainActivity : FragmentActivity() {
                 bottomMargin = dp(5)
             })
         }
-        selected.forEach { addChannelRow(it.index, it.value, selectedList) }
-        others.forEach { addChannelRow(it.index, it.value, otherList) }
+        fun addFolderGroups(items: List<IndexedValue<TvChannel>>, target: LinearLayout, prefix: String) {
+            val grouped = items.groupBy { normalizeCategoryPath(it.value.category).ifBlank { "Da classificare" } }
+                .toSortedMap(String.CASE_INSENSITIVE_ORDER)
+            grouped.forEach { (path, entries) ->
+                val key = "$prefix:$path"
+                val expanded = key in expandedCategoryPaths
+                val header = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dp(12), dp(11), dp(10), dp(11))
+                    setBackgroundColor(0xFF1B2A40.toInt())
+                    isClickable = true
+                    isFocusable = true
+                    contentDescription = "${if (expanded) "Chiudi" else "Apri"} cartella $path, ${entries.size} canali"
+                    setOnClickListener {
+                        if (expanded) expandedCategoryPaths.remove(key) else expandedCategoryPaths.add(key)
+                        renderChannels()
+                    }
+                }
+                val folderIcon = TextView(this).apply {
+                    text = if (expanded) "📂" else "📁"
+                    textSize = 17f
+                }
+                header.addView(folderIcon)
+                val title = TextView(this).apply {
+                    text = path.replace(" > ", "  ›  ")
+                    textSize = 13f
+                    setTextColor(Color.WHITE)
+                    setTypeface(null, android.graphics.Typeface.BOLD)
+                    setPadding(dp(9), 0, 0, 0)
+                }
+                header.addView(title, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                header.addView(TextView(this).apply {
+                    text = "${entries.size}  ·  ${if (expanded) "⌃" else "⌄"}"
+                    textSize = 12f
+                    setTextColor(CYAN)
+                })
+                target.addView(header, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                    bottomMargin = dp(5)
+                    topMargin = dp(4)
+                })
+                if (expanded) {
+                    entries.forEach { entry ->
+                        val holder = LinearLayout(this).apply {
+                            setPadding(dp(10), 0, 0, 0)
+                        }
+                        addChannelRow(entry.index, entry.value, holder)
+                        target.addView(holder, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+                    }
+                }
+            }
+        }
+        addFolderGroups(selected, selectedList, "selected")
+        addFolderGroups(others, otherList, "other")
         updateCount()
     }
 
