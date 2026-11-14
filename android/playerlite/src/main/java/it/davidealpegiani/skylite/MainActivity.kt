@@ -779,7 +779,9 @@ class MainActivity : Activity() {
             fullscreenChannelDrawer.visibility = View.VISIBLE
             fullscreenChannelsButton.visibility = View.GONE
             fullscreenChannelDrawer.post {
-                fullscreenChannelDrawer.getChildAt(0)?.requestFocus()
+                fullscreenChannelList.post {
+                    fullscreenChannelList.getChildAt(0)?.requestFocus()
+                }
             }
         }
     }
