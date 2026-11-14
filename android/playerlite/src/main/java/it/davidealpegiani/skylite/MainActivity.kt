@@ -126,6 +126,7 @@ class MainActivity : Activity() {
     private val cloudCategories = mutableListOf<String>()
     // Le cartelle restano chiuse all’apertura; l’espansione è condivisa tra lista e drawer fullscreen.
     private val expandedCategoryPaths = mutableSetOf<String>()
+    private var stickyCategoryKey: String? = null
     private val favoriteUrls = mutableSetOf<String>()
     private val playerPrefs by lazy { getSharedPreferences("davix_player_preferences", MODE_PRIVATE) }
     private var lastAuthorizationCheckAt = 0L
@@ -440,6 +441,9 @@ class MainActivity : Activity() {
             setPadding(dp(12), dp(10), dp(12), dp(20))
         }
         drawerScroll.addView(fullscreenChannelList)
+        drawerScroll.setOnScrollChangeListener { view: ScrollView, _, scrollY, _, _ ->
+            updateStickyCategoryHeaderFromScroll(fullscreenChannelList, scrollY)
+        }
         fullscreenChannelDrawer.addView(drawerScroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         playerContainer.addView(fullscreenChannelDrawer)
         renderFullscreenChannelList()
@@ -459,6 +463,9 @@ class MainActivity : Activity() {
             setPadding(dp(12), dp(8), dp(12), dp(12))
         }
         channelScroll.addView(channelsList)
+        channelScroll.setOnScrollChangeListener { view: ScrollView, _, scrollY, _, _ ->
+            updateStickyCategoryHeaderFromScroll(channelsList, scrollY)
+        }
         if (tvMode) controls.addView(channelScroll) else root.addView(channelScroll)
         setContentView(root)
         if (PlayerCloudSync.hasValidLease(this)) {
@@ -536,8 +543,8 @@ class MainActivity : Activity() {
     }
 
     private fun addGroupedChannelSections(target: LinearLayout, isCompact: Boolean) {
-        // La schermata iniziale mostra esclusivamente cartelle. I canali compaiono
-        // soltanto dopo l'apertura della relativa tipologia.
+        // Tutte le categorie e i relativi canali sono visibili in sequenza.
+        // L'intestazione superiore segue la sezione attraversata durante lo scroll.
         val paths = (cloudCategories + cloudChannels.map { it.category })
             .map { it.split(">").map(String::trim).filter(String::isNotBlank).joinToString(" > ") }
             .filter { it.isNotBlank() && !it.equals("Non classificati", true) }
@@ -573,9 +580,9 @@ class MainActivity : Activity() {
         items: List<CloudChannel>,
         isCompact: Boolean
     ) {
-        val expanded = key in expandedCategoryPaths
+        val expanded = true
         val folder = TextView(this).apply {
-            text = (if (expanded) "▾  " else "▸  ") + title.uppercase() + "    ·  " + items.size
+            text = title.uppercase() + "    ·  " + items.size
             setTextColor(Color.rgb(226, 241, 252))
             textSize = if (isTvDevice()) 14f else 13f
             setTypeface(null, android.graphics.Typeface.BOLD)
@@ -600,19 +607,14 @@ class MainActivity : Activity() {
                 }
             }
             setOnClickListener {
-                if (key in expandedCategoryPaths) {
-                    expandedCategoryPaths.remove(key)
-                } else {
-                    // Una sola cartella aperta alla volta: il titolo fisso identifica sempre
-                    // la lista di canali che si sta scorrendo.
-                    expandedCategoryPaths.clear()
-                    expandedCategoryPaths.add(key)
-                }
+                stickyCategoryKey = key
                 updateStickyCategoryHeader()
-                renderCloudChannels()
-                if (isTvDevice()) {
-                    val container = if (isCompact) fullscreenChannelList else channelsList
-                    container.post { container.findViewWithTag<View>("folder:$key")?.requestFocus() }
+                val container = if (isCompact) fullscreenChannelList else channelsList
+                container.post {
+                    val index = container.indexOfChild(this@apply)
+                    if (index >= 0 && index + 1 < container.childCount) {
+                        container.getChildAt(index + 1).requestFocus()
+                    }
                 }
             }
             tag = "folder:$key"
@@ -626,8 +628,24 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun updateStickyCategoryHeaderFromScroll(container: LinearLayout, scrollY: Int) {
+        var activeKey: String? = null
+        val threshold = scrollY + dp(8)
+        for (index in 0 until container.childCount) {
+            val child = container.getChildAt(index)
+            val tag = child.tag as? String ?: continue
+            if (tag.startsWith("folder:") && child.top <= threshold) {
+                activeKey = tag.removePrefix("folder:")
+            }
+        }
+        if (activeKey != null) {
+            stickyCategoryKey = activeKey
+            updateStickyCategoryHeader()
+        }
+    }
+
     private fun updateStickyCategoryHeader() {
-        val activeKey = expandedCategoryPaths.lastOrNull()
+        val activeKey = stickyCategoryKey ?: expandedCategoryPaths.lastOrNull()
         val (title, count) = when {
             activeKey == null -> "I TUOI CANALI" to cloudChannels.size
             activeKey == "special:favorites" -> "★ PREFERITI" to cloudChannels.count { it.url in favoriteUrls }
