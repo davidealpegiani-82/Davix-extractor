@@ -223,7 +223,7 @@ class MainActivity : Activity() {
         } else root
         controlsPanel = controls
         if (tvMode) {
-            tvContent.addView(controls, LinearLayout.LayoutParams(dp(420), ViewGroup.LayoutParams.MATCH_PARENT))
+            tvContent.addView(controls, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         }
         titleView = TextView(this).apply {
             text = android.text.SpannableString("DAVIX  PLAYER").apply {
@@ -402,6 +402,8 @@ class MainActivity : Activity() {
             ).apply { setMargins(dp(16), dp(16), 0, 0) }
         }
         playerContainer.addView(fullscreenChannelsButton)
+        // In navigazione il video resta nascosto: la schermata iniziale è l’elenco categorie.
+        playerContainer.visibility = View.GONE
 
         fullscreenChannelDrawer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -447,7 +449,7 @@ class MainActivity : Activity() {
             layoutParams = if (tvMode) {
                 LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
             } else {
-                LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(220))
+                LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
             }
             background = android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(Color.rgb(8, 17, 32), Color.rgb(5, 11, 22)))
         }
@@ -958,6 +960,7 @@ class MainActivity : Activity() {
         rebufferCount = 0
         lastReportedPlaybackState = Player.STATE_IDLE
         renderCloudChannels()
+        playerContainer.visibility = View.VISIBLE
         player?.apply {
             stop()
             clearMediaItems()
@@ -965,6 +968,7 @@ class MainActivity : Activity() {
             prepare()
             playWhenReady = true
         }
+        if (!isFullscreen) toggleFullscreen()
         if (isTvDevice()) playerView.post { playerView.requestFocus() }
         if (isFullscreen) showFullscreenOverlay(autoHide = true, requestFocus = false)
     }
@@ -1059,9 +1063,11 @@ class MainActivity : Activity() {
             channelScroll.visibility = View.VISIBLE
             cloudHeaderView.visibility = View.GONE
             channelsHeaderView.visibility = if (PlayerCloudSync.hasValidLease(this)) View.VISIBLE else View.GONE
-            if (isTvDevice()) playerParams.width = 0
+            player?.pause()
+            playerContainer.visibility = View.GONE
+            if (isTvDevice()) playerParams.width = ViewGroup.LayoutParams.MATCH_PARENT
             playerParams.height = if (isTvDevice()) ViewGroup.LayoutParams.MATCH_PARENT else 0
-            playerParams.weight = 1f
+            playerParams.weight = if (isTvDevice()) 0f else 1f
             playerContainer.layoutParams = playerParams
             fullscreenButton.text = "⛶"
             fullscreenButton.contentDescription = "Attiva schermo intero"
