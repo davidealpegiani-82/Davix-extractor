@@ -100,7 +100,7 @@ assert.match(lite, /private var stickyCategoryKey: String\? = null/, 'Player Lit
 assert.match(lite, /addCategoryFolder\(/, 'Player Lite must render category sections');
 assert.match(lite, /val expanded = true/, 'Player Lite must keep all category sections visible');
 assert.match(lite, /private fun updateStickyCategoryHeaderFromScroll\(/, 'Player Lite must update the pinned category header while scrolling');
-assert.match(lite, /folder:\\"\s*\+\s*key|tag\s*=\s*\\"folder:\\$key\\"/, 'Each category heading must be identifiable by the scroll tracker');
+assert.match(lite, /tag\s*=\s*"folder:\$key"/, 'Each category heading must be identifiable by the scroll tracker');
 assert.match(liteManifest, /LEANBACK_LAUNCHER/, 'Player Lite must be discoverable by Android TV launchers');
 assert.match(web, /android\/app\/src\/main\/assets\/player-template\.html/, 'web exporter must use the same template');
 assert.match(web, /async function playerHtml\(/);
