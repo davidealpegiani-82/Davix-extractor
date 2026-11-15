@@ -10,6 +10,13 @@ const playerCloudSync = readFileSync('android/playerlite/src/main/java/it/davide
 const liteManifest = readFileSync('android/playerlite/src/main/AndroidManifest.xml', 'utf8');
 const web = readFileSync('index.html', 'utf8');
 const cloudSync = readFileSync('cloud-sync/src/index.ts', 'utf8');
+const appGradle = readFileSync('android/app/build.gradle.kts', 'utf8');
+const playerLiteGradle = readFileSync('android/playerlite/build.gradle.kts', 'utf8');
+const androidWorkflow = readFileSync('.github/workflows/android-apk.yml', 'utf8');
+assert.match(appGradle, /create\("davixRelease"\)/, 'Extractor must support a stable release signing key');
+assert.match(playerLiteGradle, /create\("davixRelease"\)/, 'Player Lite must support the same stable release signing key');
+assert.match(androidWorkflow, /DAVIX_KEYSTORE_BASE64/, 'Android build workflow must read the release keystore from a GitHub secret');
+assert.match(androidWorkflow, /assemble\\\$\\\{DAVIX_BUILD_TYPE\\\}/, 'Android build workflow must select signed release or debug build consistently');
 const syntaxTemplate = template
   .replace('__CLOUD_SYNC_URL__', JSON.stringify('https://sky-cloud-sync.example.workers.dev'));
 const inlineScripts = [...syntaxTemplate.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)]
