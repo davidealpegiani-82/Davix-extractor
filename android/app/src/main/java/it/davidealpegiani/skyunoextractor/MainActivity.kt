@@ -539,6 +539,9 @@ class MainActivity : FragmentActivity() {
         adminRow.addView(space(8), LinearLayout.LayoutParams(dp(8), 1))
         adminRow.addView(buttonView("Gestisci dispositivi") { showCloudDevices() }, LinearLayout.LayoutParams(0, dp(46), 1f))
         root.addView(adminRow)
+        button("⬇  Aggiornamenti DAVIX", false) {
+            (application as DavixUpdaterApplication).showDownloads(this@MainActivity)
+        }
     }
 
     private fun showCloudSyncSettings() {
