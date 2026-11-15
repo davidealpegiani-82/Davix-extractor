@@ -375,7 +375,6 @@ async function route(request: Request, env: Env): Promise<Response> {
         typeof body.updateId !== "string" || body.updateId.length < 8 || body.updateId.length > 100 ||
         !body.channels.every(validChannel) ||
         (body.epgSourceUrl != null && !validHttpUrl(body.epgSourceUrl)) ||
-          !/^https?:\\/\\//i.test(body.epgSourceUrl) || (() => { try { const parsed = new URL(body.epgSourceUrl); return parsed.protocol !== "http:" && parsed.protocol !== "https:"; } catch { return true; } })())) ||
         (body.categories != null && (!Array.isArray(body.categories) || body.categories.length > 100 ||
           !body.categories.every((category: unknown) => typeof category === "string" && category.trim().length > 0 && category.length <= 80)))) {
       return response({ error: "invalid_configuration" }, 400);
