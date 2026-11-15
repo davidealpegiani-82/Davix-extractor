@@ -21,6 +21,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
       - name: Verify shared HTML player template
         run: node android/scripts/verify-player-template.mjs
       - name: Set up JDK 17
