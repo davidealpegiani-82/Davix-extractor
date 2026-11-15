@@ -501,7 +501,6 @@ class MainActivity : Activity() {
         fullscreenChannelDrawer.addView(drawerScroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         playerContainer.addView(fullscreenChannelDrawer)
         renderFullscreenChannelList()
-        if (wideLayout) tvContent.addView(playerContainer) else root.addView(playerContainer)
         channelScroll = ScrollView(this).apply {
             isFillViewport = true
             isFocusable = false
