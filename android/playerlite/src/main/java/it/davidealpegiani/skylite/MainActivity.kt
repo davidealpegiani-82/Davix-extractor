@@ -72,6 +72,16 @@ class MainActivity : Activity() {
                 cloudStatusView.text = "Licenza offline scaduta. Riconnetti e attiva nuovamente il dispositivo."
                 return
             }
+            // Non mostrare lo stato interno di ExoPlayer come se fosse un flusso attivo
+            // quando l'utente non ha ancora selezionato un canale.
+            if (current.mediaItemCount == 0 || selectedChannelForRecovery == null) {
+                val leaseState = if (PlayerCloudSync.hasValidLease(this@MainActivity)) "licenza valida" else "licenza non attiva"
+                diagnosticsView.text = "PLAYER: IN ATTESA · nessun canale selezionato\n" +
+                    "$leaseState · pronto per la riproduzione"
+                lastReportedPlaybackState = Player.STATE_IDLE
+                retryHandler.postDelayed(this, 1000L)
+                return
+            }
             val now = System.currentTimeMillis()
             if (PlayerCloudSync.hasValidLease(this@MainActivity) && now - lastAuthorizationCheckAt >= 6 * 60 * 60 * 1000L) {
                 lastAuthorizationCheckAt = now
@@ -108,6 +118,7 @@ class MainActivity : Activity() {
     private var rebufferCount = 0
     private var lastReportedPlaybackState = Player.STATE_IDLE
     private var lastPlayerError = "nessuno"
+    private var lastHttpStatusCode: Int? = null
     private lateinit var endpointInput: EditText
     private lateinit var activationCodeInput: EditText
     private lateinit var pairButton: Button
@@ -1020,6 +1031,8 @@ class MainActivity : Activity() {
         lastObservedPositionMs = C.TIME_UNSET
         retryCount = 0
         lastPlayerError = "nessuno"
+        lastHttpStatusCode = null
+        lastHlsLoad = "in attesa del primo segmento"
         rebufferCount = 0
         lastReportedPlaybackState = Player.STATE_IDLE
         renderCloudChannels()
@@ -1322,6 +1335,22 @@ class MainActivity : Activity() {
         retryHandler.postDelayed(task, delay)
     }
 
+    private fun describeHttpStatus(code: Int): String = when (code) {
+        400 -> "richiesta non valida"
+        401 -> "autenticazione richiesta"
+        403 -> "accesso negato dal server"
+        404 -> "flusso o segmento non trovato"
+        408 -> "timeout della richiesta"
+        410 -> "flusso non più disponibile"
+        425 -> "richiesta temporaneamente non accettata"
+        429 -> "troppe richieste · attesa necessaria"
+        in 500..599 -> "server temporaneamente in errore"
+        else -> "risposta HTTP non valida"
+    }
+
+    private fun isRetryableHttpStatus(code: Int): Boolean =
+        code == 408 || code == 425 || code == 429 || code in 500..599
+
     private fun initializePlayer() {
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
@@ -1398,8 +1427,12 @@ class MainActivity : Activity() {
                                 }
                                 cause = cause.cause
                             }
-                            lastHlsLoad = httpCode?.let { "errore $kind HTTP $it" }
-                                ?: "errore $kind: ${error.javaClass.simpleName}"
+                            if (httpCode != null) {
+                                lastHttpStatusCode = httpCode
+                                lastHlsLoad = "errore $kind HTTP $httpCode · ${describeHttpStatus(httpCode)}"
+                            } else {
+                                lastHlsLoad = "errore $kind: ${error.javaClass.simpleName}"
+                            }
                         }
                     }
                 })
@@ -1414,15 +1447,41 @@ class MainActivity : Activity() {
                     }
 
                     override fun onPlayerError(error: PlaybackException) {
-                        lastPlayerError = error.errorCodeName
-                        val retryable = error.errorCodeName.contains("IO_") ||
-                            error.errorCodeName.contains("TIMEOUT") ||
-                            error.errorCodeName.contains("BEHIND_LIVE_WINDOW")
+                        var cause: Throwable? = error
+                        var httpCode: Int? = null
+                        while (cause != null) {
+                            if (cause is HttpDataSource.InvalidResponseCodeException) {
+                                httpCode = cause.responseCode
+                                break
+                            }
+                            cause = cause.cause
+                        }
+
+                        val retryable = if (httpCode != null) {
+                            lastHttpStatusCode = httpCode
+                            lastPlayerError = "HTTP $httpCode · ${describeHttpStatus(httpCode)}"
+                            isRetryableHttpStatus(httpCode)
+                        } else {
+                            lastPlayerError = error.errorCodeName
+                            error.errorCodeName.contains("IO_") ||
+                                error.errorCodeName.contains("TIMEOUT") ||
+                                error.errorCodeName.contains("BEHIND_LIVE_WINDOW")
+                        }
+
                         if (retryable) {
                             bufferingStartedAt = System.currentTimeMillis()
-                            schedulePlaybackRecovery("Errore ${error.errorCodeName}: ripristino")
+                            val reason = if (httpCode != null) {
+                                "HTTP $httpCode · ${describeHttpStatus(httpCode)}: nuovo tentativo"
+                            } else {
+                                "Errore ${error.errorCodeName}: ripristino"
+                            }
+                            schedulePlaybackRecovery(reason)
                         } else {
-                            statusView.text = "Errore non recuperabile: ${error.errorCodeName}"
+                            statusView.text = if (httpCode != null) {
+                                "HTTP $httpCode: ${describeHttpStatus(httpCode)}. Seleziona un altro flusso o verifica la sorgente."
+                            } else {
+                                "Errore non recuperabile: ${error.errorCodeName}"
+                            }
                         }
                     }
 
@@ -1506,6 +1565,8 @@ class MainActivity : Activity() {
         cancelPendingRecovery()
         selectedChannelForRecovery = CloudChannel(channelName, streamUrl)
         lastPlayerError = "nessuno"
+        lastHttpStatusCode = null
+        lastHlsLoad = "in attesa del primo segmento"
         rebufferCount = 0
         lastReportedPlaybackState = Player.STATE_IDLE
         bufferingStartedAt = System.currentTimeMillis()
