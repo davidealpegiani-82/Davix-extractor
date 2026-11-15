@@ -124,9 +124,12 @@ jobs:
         run: |
           set -euo pipefail
           variant="$(echo "${{ steps.apk-signing.outputs.build_type }}" | tr '[:upper:]' '[:lower:]')"
+          export DAVIX_BUILD_VARIANT="$variant"
           python3 - <<'PY'
           import json
+          import os
           from pathlib import Path
+          variant = os.environ["DAVIX_BUILD_VARIANT"]
           def read_meta(path):
               data = json.loads(Path(path).read_text())
               element = data["elements"][0]
