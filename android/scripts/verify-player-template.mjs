@@ -6,6 +6,7 @@ const kotlin = readFileSync('android/app/src/main/java/it/davidealpegiani/skyuno
 const lite = readFileSync('android/playerlite/src/main/java/it/davidealpegiani/skylite/MainActivity.kt', 'utf8');
 const extractorKotlin = readFileSync('android/app/src/main/java/it/davidealpegiani/skyunoextractor/MainActivity.kt', 'utf8');
 const epgManager = readFileSync('android/playerlite/src/main/java/it/davidealpegiani/skylite/EpgGuideManager.kt', 'utf8');
+const playerCloudSync = readFileSync('android/playerlite/src/main/java/it/davidealpegiani/skylite/PlayerCloudSync.kt', 'utf8');
 const liteManifest = readFileSync('android/playerlite/src/main/AndroidManifest.xml', 'utf8');
 const web = readFileSync('index.html', 'utf8');
 const cloudSync = readFileSync('cloud-sync/src/index.ts', 'utf8');
@@ -160,3 +161,4 @@ assert.ok(lite.includes("addGroupedChannelSections("), 'Player Lite must render 
 assert.ok(template.includes("const roots="), 'HTML Player must render category trees');
 assert.ok(cloudSync.includes("channel.category.length > 80"), 'Cloud Sync must accept nested category paths');
 assert.ok(cloudSync.includes("category.length <= 80"), 'Cloud Sync category metadata must accept nested paths');
+assert.match(playerCloudSync, /category\.length <= 80/, 'Player Lite must accept the same 80-character category limit as Cloud Sync');

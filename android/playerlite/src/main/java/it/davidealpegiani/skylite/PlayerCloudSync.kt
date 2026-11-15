@@ -100,14 +100,14 @@ internal object PlayerCloudSync {
         require(categories == null || categories.length() <= 100) { "La configurazione contiene troppe categorie." }
         if (categories != null) for (index in 0 until categories.length()) {
             val category = categories.optString(index)
-            require(category.isNotBlank() && category.length <= 40) { "La configurazione contiene una categoria non valida." }
+            require(category.isNotBlank() && category.length <= 80) { "La configurazione contiene una categoria non valida." }
         }
         val valid = (0 until channels.length()).count { index ->
             val channel = channels.optJSONObject(index) ?: return@count false
             val name = channel.optString("name")
             val stream = channel.optString("url")
             val category = channel.optString("category", "Non classificati")
-            name.isNotBlank() && category.length <= 40 &&
+            name.isNotBlank() && category.length <= 80 &&
                 (stream.startsWith("https://", true) || stream.startsWith("http://", true))
         }
         require(valid == channels.length()) { "La configurazione contiene canali non validi." }
