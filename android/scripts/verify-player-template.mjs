@@ -68,6 +68,8 @@ assert.match(lite, /setMinPlaybackSpeed\(0\.97f\)/);
 assert.match(lite, /setMaxPlaybackSpeed\(1\.04f\)/);
 assert.match(lite, /DefaultLoadErrorHandlingPolicy\(8\)/);
 assert.match(lite, /private fun monitorPlaybackHealth\(/, 'Player Lite must detect stalled playback even without a Media3 error');
+assert.match(lite, /private fun isCurrentAnalyticsEvent\(/, 'Player Lite must reject analytics callbacks from an obsolete channel timeline');
+assert.match(lite, /eventTime\.timeline == current\.currentTimeline/, 'HLS analytics must belong to the active Media3 timeline');
 assert.match(lite, /private fun schedulePlaybackRecovery\(/, 'Player Lite must have a persistent automatic recovery path');
 assert.match(lite, /longArrayOf\(2_000L, 4_000L, 8_000L, 15_000L, 30_000L, 45_000L, 60_000L\)/, 'recovery retries must use capped backoff without a fixed attempt limit');
 assert.match(lite, /setTargetOffsetMs\(60_000\)/, 'live playback must keep a larger safety offset');
