@@ -234,6 +234,35 @@ async function route(request: Request, env: Env): Promise<Response> {
     return response({ ...metadata, unchanged: false, config: JSON.parse(row.payload) });
   }
 
+  if (request.method === "GET" && path === "/v1/epg") {
+    const device = await requireDevice(request, env);
+    if (!device) return response({ error: "device_not_authorized" }, 403);
+    const source = url.searchParams.get("source") || "";
+    const sources: Record<string, string> = {
+      sky: "https://iptv-org.github.io/epg/guides/it/guidatv.sky.it.xml",
+      iptv: "https://iptv-epg.org/files/epg-it.xml.gz",
+      epgshare: "https://epgshare01.online/epgshare01/epg_ripper_IT1.xml.gz",
+      open3: "https://www.open-epg.com/files/italy3.xml.gz",
+      open8: "https://www.open-epg.com/files/italy8.xml.gz",
+    };
+    const upstreamUrl = sources[source];
+    if (!upstreamUrl) return response({ error: "invalid_epg_source" }, 400);
+    const upstream = await fetch(upstreamUrl, {
+      headers: { accept: "application/xml,text/xml,application/gzip,*/*" },
+      cf: { cacheTtl: 1800, cacheEverything: true },
+    });
+    if (!upstream.ok) {
+      return response({ error: "epg_source_unavailable", upstreamStatus: upstream.status }, 502);
+    }
+    return new Response(upstream.body, {
+      status: 200,
+      headers: {
+        "content-type": upstream.headers.get("content-type") || "application/xml; charset=utf-8",
+        "cache-control": "private, max-age=1800",
+      },
+    });
+  }
+
   if (request.method === "POST" && path === "/v1/admin/config/publish") {
     if (!(await requireAdmin(request, env))) return response({ error: "unauthorized" }, 401);
     let body: PublishedConfig;
