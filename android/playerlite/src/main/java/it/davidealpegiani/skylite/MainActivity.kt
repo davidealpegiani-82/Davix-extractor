@@ -1489,8 +1489,14 @@ class MainActivity : Activity() {
                         if (isPlaying) {
                             lastPlaybackProgressAt = System.currentTimeMillis()
                             bufferingStartedAt = 0L
+                            // Un reset di stabilità appartenente al canale precedente non deve
+                            // azzerare il backoff dopo un cambio rapido di canale.
+                            val stableGeneration = playbackGeneration
                             retryHandler.postDelayed({
-                                if (player?.isPlaying == true) retryCount = 0
+                                if (playbackGeneration == stableGeneration &&
+                                    player === exo && exo.isPlaying) {
+                                    retryCount = 0
+                                }
                             }, 60_000L)
                         } else if (player?.playWhenReady == true && bufferingStartedAt == 0L) {
                             bufferingStartedAt = System.currentTimeMillis()
@@ -1591,6 +1597,11 @@ class MainActivity : Activity() {
         cancelPendingRecovery()
         resumeAfterBackground = player?.playWhenReady == true && (player?.mediaItemCount ?: 0) > 0
         player?.pause()
+        // Il tempo trascorso in background non è buffering: evita riconnessioni
+        // immediate e falsi allarmi al ritorno in primo piano.
+        bufferingStartedAt = 0L
+        lastPlaybackProgressAt = System.currentTimeMillis()
+        lastObservedPositionMs = C.TIME_UNSET
         super.onStop()
     }
 
@@ -1599,6 +1610,9 @@ class MainActivity : Activity() {
         retryHandler.removeCallbacks(diagnosticsTask)
         retryHandler.post(diagnosticsTask)
         if (resumeAfterBackground && (player?.mediaItemCount ?: 0) > 0 && PlayerCloudSync.hasValidLease(this)) {
+            bufferingStartedAt = 0L
+            lastPlaybackProgressAt = System.currentTimeMillis()
+            lastObservedPositionMs = C.TIME_UNSET
             player?.playWhenReady = true
         } else if (!PlayerCloudSync.hasValidLease(this)) {
             stopPlaybackForAuthorization()
