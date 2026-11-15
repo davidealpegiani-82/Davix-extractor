@@ -7,6 +7,7 @@ const lite = readFileSync('android/playerlite/src/main/java/it/davidealpegiani/s
 const extractorKotlin = readFileSync('android/app/src/main/java/it/davidealpegiani/skyunoextractor/MainActivity.kt', 'utf8');
 const epgManager = readFileSync('android/playerlite/src/main/java/it/davidealpegiani/skylite/EpgGuideManager.kt', 'utf8');
 const playerCloudSync = readFileSync('android/playerlite/src/main/java/it/davidealpegiani/skylite/PlayerCloudSync.kt', 'utf8');
+const sourceSettings = readFileSync('android/app/src/main/java/it/davidealpegiani/skyunoextractor/IptvSourceSettings.kt', 'utf8');
 assert.match(epgManager, /MAX_DECOMPRESSED_BYTES = 48L \* 1024L \* 1024L/, 'EPG downloads must be capped after decompression');
 assert.match(epgManager, /LimitedInputStream\(decompressed, MAX_DECOMPRESSED_BYTES\)/, 'EPG parser must never consume an unbounded XMLTV stream');
 assert.match(epgManager, /MAX_CHANNELS = 20_000/, 'EPG parser must cap channel metadata');
@@ -160,7 +161,7 @@ assert.match(lite, /addGroupedChannelSections\(/, 'Player Lite must render categ
 assert.match(lite, /toggleFavorite\(/, 'Player Lite must expose local favorite selection');
 assert.match(lite, /favorite_urls/, 'Player Lite favorites must persist locally');
 assert.doesNotMatch(lite, /showCategoryManager|showCategoryPicker/, 'Player Lite must not edit Extractor-defined categories');
-assert.match(readFileSync('cloud-sync/src/index.ts', 'utf8'), /categories, channels: body.channels/, 'Cloud Sync must persist category metadata with channels');
+assert.match(readFileSync('cloud-sync/src/index.ts', 'utf8'), /categories,[\s\S]*?channels: body\.channels/, 'Cloud Sync must persist category metadata with channels');
 console.log('Player template checks passed.');
 
 const extractor = readFileSync('android/app/src/main/java/it/davidealpegiani/skyunoextractor/MainActivity.kt', 'utf8');
@@ -189,3 +190,16 @@ assert.ok(cloudSync.includes("category.length <= 80"), 'Cloud Sync category meta
 assert.match(cloudSync, /version = config\.version \+ 1[\s\S]*?RETURNING version/, 'Cloud Sync must increment published config versions atomically');
 assert.doesNotMatch(cloudSync, /SELECT version FROM config WHERE config_id = 1/, 'Cloud Sync must not use a race-prone read-then-write version sequence');
 assert.match(playerCloudSync, /category\.length <= 80/, 'Player Lite must accept the same 80-character category limit as Cloud Sync');
+assert.match(extractorKotlin, /showIptvSourceSettings\(/, 'Extractor must expose direct M3U and XMLTV URL settings');
+assert.match(extractorKotlin, /importPlaylistFromUrl\(/, 'Extractor must download and parse an M3U directly from its URL');
+assert.match(sourceSettings, /AES\/GCM\/NoPadding/, 'IPTV source URLs must be encrypted at rest on Android');
+assert.match(sourceSettings, /AndroidKeyStore/, 'IPTV source encryption keys must remain in Android Keystore');
+assert.match(admin, /epgSourceUrl/, 'Extractor Cloud Sync publish must forward the configured XMLTV source');
+assert.match(cloudSync, /encryptEpgSource\(/, 'Cloud Sync must encrypt the custom XMLTV URL before persistence');
+assert.match(cloudSync, /decryptEpgSource\(/, 'Cloud Sync must decrypt the XMLTV URL only for authorized Player configuration responses');
+assert.match(cloudSync, /epgSourceEncrypted/, 'Cloud Sync database payload must contain ciphertext rather than the XMLTV URL');
+assert.match(playerCloudSync, /saveCustomEpgSource\(/, 'Player Lite must save the custom XMLTV URL encrypted');
+assert.match(playerCloudSync, /remove\("epgSourceUrl"\)/, 'Player Lite must not persist the credential-bearing URL in plain config JSON');
+assert.match(lite, /PlayerCloudSync\.customEpgSource\(this\)/, 'Player Lite must use the protected custom XMLTV source');
+assert.match(epgManager, /XMLTV personalizzato/, 'Custom XMLTV must be added as the primary EPG source');
+

@@ -21,6 +21,7 @@ type PublishedConfig = {
   publishedAt?: string;
   categories?: string[];
   channels: Channel[];
+  epgSourceUrl?: string;
 };
 
 const JSON_HEADERS = {
@@ -59,6 +60,60 @@ async function sha256(value: string): Promise<string> {
   const bytes = new TextEncoder().encode(value);
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return [...new Uint8Array(digest)].map((v) => v.toString(16).padStart(2, "0")).join("");
+}
+
+function toBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (const value of bytes) binary += String.fromCharCode(value);
+  return btoa(binary);
+}
+
+function fromBase64(value: string): Uint8Array {
+  return Uint8Array.from(atob(value), (character) => character.charCodeAt(0));
+}
+
+async function epgEncryptionKey(secret: string): Promise<CryptoKey> {
+  const material = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    "HKDF",
+    false,
+    ["deriveKey"],
+  );
+  return crypto.subtle.deriveKey(
+    {
+      name: "HKDF",
+      hash: "SHA-256",
+      salt: new TextEncoder().encode("DAVIX-CLOUD-SYNC"),
+      info: new TextEncoder().encode("custom-xmltv-source-v1"),
+    },
+    material,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"],
+  );
+}
+
+/** The credential-bearing XMLTV URL is encrypted before it is written to D1. */
+async function encryptEpgSource(value: string, secret: string): Promise<string> {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const encrypted = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    await epgEncryptionKey(secret),
+    new TextEncoder().encode(value),
+  );
+  return "v1." + toBase64(iv) + "." + toBase64(new Uint8Array(encrypted));
+}
+
+async function decryptEpgSource(value: string, secret: string): Promise<string> {
+  const [version, ivValue, encryptedValue] = value.split(".");
+  if (version !== "v1" || !ivValue || !encryptedValue) throw new Error("INVALID_EPG_CREDENTIAL");
+  const decrypted = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: fromBase64(ivValue) },
+    await epgEncryptionKey(secret),
+    fromBase64(encryptedValue),
+  );
+  return new TextDecoder().decode(decrypted);
 }
 
 function bearer(request: Request): string {
@@ -101,6 +156,16 @@ async function readJson(request: Request, maxBytes = 1_000_000): Promise<any> {
     return JSON.parse(new TextDecoder().decode(payload));
   } catch {
     throw new Error("INVALID_JSON");
+  }
+}
+
+function validHttpUrl(value: unknown): value is string {
+  if (typeof value !== "string" || !value.trim() || value.length > 8192) return false;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
   }
 }
 
@@ -263,7 +328,12 @@ async function route(request: Request, env: Env): Promise<Response> {
     if (Number.isSafeInteger(sinceVersion) && sinceVersion >= row.version) {
       return response({ ...metadata, unchanged: true });
     }
-    return response({ ...metadata, unchanged: false, config: JSON.parse(row.payload) });
+    const config = JSON.parse(row.payload) as Record<string, unknown>;
+    if (typeof config.epgSourceEncrypted === "string") {
+      config.epgSourceUrl = await decryptEpgSource(config.epgSourceEncrypted, env.SKY_ADMIN_KEY);
+      delete config.epgSourceEncrypted;
+    }
+    return response({ ...metadata, unchanged: false, config });
   }
 
   if (request.method === "GET" && path === "/v1/epg") {
@@ -304,6 +374,7 @@ async function route(request: Request, env: Env): Promise<Response> {
     if (!body || body.schemaVersion !== 1 || !Array.isArray(body.channels) || body.channels.length > 1000 ||
         typeof body.updateId !== "string" || body.updateId.length < 8 || body.updateId.length > 100 ||
         !body.channels.every(validChannel) ||
+        (body.epgSourceUrl != null && !validHttpUrl(body.epgSourceUrl)) ||
         (body.categories != null && (!Array.isArray(body.categories) || body.categories.length > 100 ||
           !body.categories.every((category: unknown) => typeof category === "string" && category.trim().length > 0 && category.length <= 80)))) {
       return response({ error: "invalid_configuration" }, 400);
@@ -311,7 +382,16 @@ async function route(request: Request, env: Env): Promise<Response> {
     const categories = Array.isArray(body.categories)
       ? [...new Set(body.categories.map((category: string) => category.trim()))]
       : [];
-    const payload = JSON.stringify({ schemaVersion: 1, updateId: body.updateId, categories, channels: body.channels });
+    const epgSourceEncrypted = body.epgSourceUrl?.trim()
+      ? await encryptEpgSource(body.epgSourceUrl.trim(), env.SKY_ADMIN_KEY)
+      : undefined;
+    const payload = JSON.stringify({
+      schemaVersion: 1,
+      updateId: body.updateId,
+      categories,
+      channels: body.channels,
+      ...(epgSourceEncrypted ? { epgSourceEncrypted } : {}),
+    });
     const checksum = await sha256(payload);
     const publishedAt = Date.now();
     const published = await env.DB.prepare(

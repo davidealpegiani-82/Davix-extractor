@@ -9,6 +9,7 @@ import java.io.FilterInputStream
 import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -77,10 +78,9 @@ internal object EpgGuideManager {
     }
     private data class Dataset(val channelNames: Map<String, List<String>>, val programs: Map<String, List<Program>>)
 
-    fun shouldRefresh(context: Context, channels: List<EpgChannelInput>): Boolean {
+    fun shouldRefresh(context: Context, channels: List<EpgChannelInput>, customSource: String? = null): Boolean {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val signature = channels.map { normalize(it.tvgId) + "|" + normalize(it.tvgName.ifBlank { it.name }) }
-            .sorted().joinToString("\n")
+        val signature = channelSignature(channels, customSource)
         val now = System.currentTimeMillis()
         val signatureChanged = prefs.getString(CHANNEL_SIGNATURE, null) != signature
         val matchedCount = prefs.getInt(MATCHED_COUNT, 0)
@@ -108,13 +108,17 @@ internal object EpgGuideManager {
         }.getOrDefault(emptyMap())
     }
 
-    fun refresh(context: Context, channels: List<EpgChannelInput>): EpgRefreshResult {
+    fun refresh(context: Context, channels: List<EpgChannelInput>, customSource: String? = null): EpgRefreshResult {
         require(channels.isNotEmpty()) { "Nessun canale da associare." }
+        val activeSources = buildList {
+            customSource?.trim()?.takeIf { it.startsWith("http://", true) || it.startsWith("https://", true) }
+                ?.let { add("XMLTV personalizzato" to it) }
+            addAll(sources)
+        }
 
-        // Avvia tutte le fonti in parallelo, con massimo 3 download/parse simultanei
-        // per non saturare memoria e connessione sui dispositivi Android TV meno potenti.
-        val executor = Executors.newFixedThreadPool(minOf(3, sources.size))
-        val futures = sources.map { (label, address) ->
+        // Avvia le fonti in parallelo, con massimo 3 download/parse simultanei.
+        val executor = Executors.newFixedThreadPool(minOf(3, activeSources.size))
+        val futures = activeSources.map { (label, address) ->
             executor.submit(Callable { label to download(address) })
         }
         val datasets = mutableListOf<Pair<String, Dataset>>()
@@ -157,7 +161,8 @@ internal object EpgGuideManager {
             val next = mergedPrograms.firstOrNull { it.start > now }
 
             channelCandidates.forEach { (label, _, _) -> usedSources.add(label) }
-            val preferredId = channelCandidates.firstOrNull { it.first == "Sky Italia" }?.second
+            val preferredId = channelCandidates.firstOrNull { it.first == "XMLTV personalizzato" }?.second
+                ?: channelCandidates.firstOrNull { it.first == "Sky Italia" }?.second
                 ?: channelCandidates.first().second
             result[channel.url] = EpgGuide(
                 current?.title.orEmpty(),
@@ -173,8 +178,7 @@ internal object EpgGuideManager {
         result.forEach { (url, guide) ->
             cache.put(url, JSONObject().put("now", guide.nowTitle).put("next", guide.nextTitle).put("start", guide.nowStartMs).put("stop", guide.nowStopMs).put("id", guide.epgId))
         }
-        val signature = channels.map { normalize(it.tvgId) + "|" + normalize(it.tvgName.ifBlank { it.name }) }
-            .sorted().joinToString("\n")
+        val signature = channelSignature(channels, customSource)
         val editor = prefs.edit()
             .putString(GUIDE_CACHE, cache.toString())
             .putString(MATCH_CACHE, newMatches.toString())
@@ -205,6 +209,17 @@ internal object EpgGuideManager {
         val best = scored.firstOrNull() ?: return null
         val runnerUp = scored.getOrNull(1)?.second ?: 0.0
         return best.first.takeIf { best.second >= 0.92 && best.second - runnerUp >= 0.10 }
+    }
+
+    private fun channelSignature(channels: List<EpgChannelInput>, customSource: String?): String {
+        val channelPart = channels.map { normalize(it.tvgId) + "|" + normalize(it.tvgName.ifBlank { it.name }) }
+            .sorted().joinToString("\n")
+        // Hash the full URL (including query credentials); never persist the URL itself in preferences.
+        val sourcePart = customSource?.trim()?.takeIf { it.isNotBlank() }?.let {
+            MessageDigest.getInstance("SHA-256").digest(it.toByteArray(Charsets.UTF_8))
+                .joinToString("") { byte -> "%02x".format(byte) }
+        }.orEmpty()
+        return channelPart + "\ncustom-epg:" + sourcePart
     }
 
     private fun normalize(value: String): String = value.lowercase(Locale.ROOT)

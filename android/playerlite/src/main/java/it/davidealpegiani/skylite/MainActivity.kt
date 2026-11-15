@@ -1012,7 +1012,8 @@ class MainActivity : Activity() {
             epgStatusView.text = "EPG: nessun programma in cache · controllo delle fonti…"
         }
         val snapshot = cloudChannels.map { EpgChannelInput(it.name, it.url, it.tvgId, it.tvgName) }
-        if (!force && !EpgGuideManager.shouldRefresh(this, snapshot)) {
+        val customEpgSource = PlayerCloudSync.customEpgSource(this)
+        if (!force && !EpgGuideManager.shouldRefresh(this, snapshot, customEpgSource)) {
             epgStatusView.text = if (epgGuides.isNotEmpty()) {
                 "EPG aggiornato · $cachedNowCount programmi in onda disponibili"
             } else {
@@ -1023,7 +1024,7 @@ class MainActivity : Activity() {
         epgRefreshInProgress = true
         epgStatusView.text = "EPG: recupero palinsesti e associazione automatica dei canali…"
         cloudExecutor.execute {
-            val result = runCatching { EpgGuideManager.refresh(this@MainActivity, snapshot) }
+            val result = runCatching { EpgGuideManager.refresh(this@MainActivity, snapshot, customEpgSource) }
             runOnUiThread {
                 epgRefreshInProgress = false
                 if (isFinishing || isDestroyed) return@runOnUiThread

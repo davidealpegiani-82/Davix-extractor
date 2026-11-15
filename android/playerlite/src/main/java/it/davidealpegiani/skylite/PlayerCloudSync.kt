@@ -23,6 +23,7 @@ internal object PlayerCloudSync {
     private const val BASE_URL = "base_url"
     private const val INSTALL_ID = "install_id"
     private const val TOKEN = "device_token"
+    private const val EPG_SOURCE = "custom_epg_source"
     private const val VERSION = "config_version"
     private const val CONFIG = "config_json"
     private const val LEASE_EXPIRY = "lease_expires_at"
@@ -47,7 +48,7 @@ internal object PlayerCloudSync {
     fun clearAuthorization(context: Context) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .remove(CONFIG).remove(VERSION).remove(LEASE_EXPIRY).apply()
-        context.getSharedPreferences(SECURE_PREFS, Context.MODE_PRIVATE).edit().remove(TOKEN).apply()
+        context.getSharedPreferences(SECURE_PREFS, Context.MODE_PRIVATE).edit().remove(TOKEN).remove(EPG_SOURCE).apply()
     }
 
     fun currentVersion(context: Context): Int =
@@ -56,6 +57,32 @@ internal object PlayerCloudSync {
     fun cachedConfig(context: Context): JSONObject? =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getString(CONFIG, null)?.let { runCatching { JSONObject(it) }.getOrNull() }
+
+    /** The custom XMLTV URL contains account credentials and is never kept in plain config JSON. */
+    fun customEpgSource(context: Context): String? {
+        val packedValue = context.getSharedPreferences(SECURE_PREFS, Context.MODE_PRIVATE)
+            .getString(EPG_SOURCE, null) ?: return null
+        return runCatching {
+            val packed = Base64.decode(packedValue, Base64.NO_WRAP)
+            require(packed.size > 12)
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), GCMParameterSpec(128, packed.copyOfRange(0, 12)))
+            String(cipher.doFinal(packed.copyOfRange(12, packed.size)), StandardCharsets.UTF_8)
+        }.getOrNull()
+    }
+
+    private fun saveCustomEpgSource(context: Context, value: String?) {
+        val editor = context.getSharedPreferences(SECURE_PREFS, Context.MODE_PRIVATE).edit()
+        if (value.isNullOrBlank()) {
+            editor.remove(EPG_SOURCE)
+        } else {
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
+            val encrypted = cipher.doFinal(value.toByteArray(StandardCharsets.UTF_8))
+            editor.putString(EPG_SOURCE, Base64.encodeToString(cipher.iv + encrypted, Base64.NO_WRAP))
+        }
+        editor.apply()
+    }
 
     fun activate(context: Context, codeValue: String): JSONObject {
         val code = codeValue.uppercase().filter { it.isLetterOrDigit() }
@@ -112,9 +139,15 @@ internal object PlayerCloudSync {
         }
         require(valid == channels.length()) { "La configurazione contiene canali non validi." }
 
+        // Le credenziali EPG sono cifrate nel Keystore del Player e rimosse
+        // dal JSON della configurazione persistente.
+        val customEpg = config.optString("epgSourceUrl").takeIf { it.startsWith("http://", true) || it.startsWith("https://", true) }
+        saveCustomEpgSource(context, customEpg)
+        val safeConfig = JSONObject(config.toString()).apply { remove("epgSourceUrl") }
+
         // Salvataggio atomico: la versione avanza solo dopo aver validato l'intera lista.
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putString(CONFIG, config.toString())
+            .putString(CONFIG, safeConfig.toString())
             .putInt(VERSION, result.optInt("version", version))
             .putLong(LEASE_EXPIRY, lease)
             .apply()
