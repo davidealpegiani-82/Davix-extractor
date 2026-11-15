@@ -67,9 +67,41 @@ function bearer(request: Request): string {
 }
 
 async function readJson(request: Request, maxBytes = 1_000_000): Promise<any> {
-  const raw = await request.text();
-  if (new TextEncoder().encode(raw).byteLength > maxBytes) throw new Error("PAYLOAD_TOO_LARGE");
-  try { return JSON.parse(raw); } catch { throw new Error("INVALID_JSON"); }
+  const declaredLength = Number(request.headers.get("content-length") || "0");
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    throw new Error("PAYLOAD_TOO_LARGE");
+  }
+
+  const reader = request.body?.getReader();
+  if (!reader) throw new Error("INVALID_JSON");
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        throw new Error("PAYLOAD_TOO_LARGE");
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const payload = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    payload.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(payload));
+  } catch {
+    throw new Error("INVALID_JSON");
+  }
 }
 
 function validChannel(channel: any): channel is Channel {
