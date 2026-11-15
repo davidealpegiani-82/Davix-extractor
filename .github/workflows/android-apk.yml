@@ -62,6 +62,10 @@ jobs:
             printf '%s' "$DAVIX_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/davix-release.jks"
             chmod 600 "$RUNNER_TEMP/davix-release.jks"
             echo "DAVIX_SIGNING_STORE_FILE=$RUNNER_TEMP/davix-release.jks" >> "$GITHUB_ENV"
+            # Persist all signing inputs for the following Gradle build step.
+            echo "DAVIX_SIGNING_STORE_PASSWORD=$DAVIX_SIGNING_STORE_PASSWORD" >> "$GITHUB_ENV"
+            echo "DAVIX_SIGNING_KEY_ALIAS=$DAVIX_SIGNING_KEY_ALIAS" >> "$GITHUB_ENV"
+            echo "DAVIX_SIGNING_KEY_PASSWORD=$DAVIX_SIGNING_KEY_PASSWORD" >> "$GITHUB_ENV"
             echo "build_type=Release" >> "$GITHUB_OUTPUT"
             echo "stable_signing=true" >> "$GITHUB_OUTPUT"
             echo "Stable release signing enabled."
@@ -85,8 +89,8 @@ jobs:
           extractor_dir="android/app/build/outputs/apk/$variant"
           player_dir="android/playerlite/build/outputs/apk/$variant"
 
-          extractor_apk="$(find "$extractor_dir" -type f -name '*.apk' -print -quit)"
-          player_apk="$(find "$player_dir" -type f -name '*.apk' -print -quit)"
+          extractor_apk="$(find "$extractor_dir" -type f -name '*.apk' ! -name '*unsigned*.apk' -print -quit)"
+          player_apk="$(find "$player_dir" -type f -name '*.apk' ! -name '*unsigned*.apk' -print -quit)"
 
           if [ -z "$extractor_apk" ]; then
             echo "::error::No Extractor APK found under $extractor_dir"
@@ -103,6 +107,18 @@ jobs:
           cp "$extractor_apk" android/dist/DAVIX-Extractor.apk
           cp "$player_apk" android/dist/DAVIX-Player.apk
           ls -lh android/dist
+      - name: Verify APK signatures
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk_root="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          test -n "$sdk_root" || { echo "::error::Android SDK path is unavailable"; exit 1; }
+          apksigner="$(find "$sdk_root/build-tools" -type f -name apksigner -print | sort -V | tail -n 1)"
+          test -n "$apksigner" || { echo "::error::apksigner not found in Android build-tools"; exit 1; }
+          for apk in android/dist/DAVIX-Extractor.apk android/dist/DAVIX-Player.apk; do
+            echo "Verifying $apk"
+            "$apksigner" verify --verbose --print-certs "$apk"
+          done
       - name: Upload DAVIX Extractor APK
         uses: actions/upload-artifact@v4
         with:
