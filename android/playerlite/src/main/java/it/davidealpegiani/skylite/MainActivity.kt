@@ -1360,6 +1360,17 @@ class MainActivity : Activity() {
     private fun isRetryableHttpStatus(code: Int): Boolean =
         code == 408 || code == 425 || code == 429 || code in 500..599
 
+    /**
+     * Scarta gli eventi Analytics appartenenti a una timeline/canale precedente.
+     * Media3 può consegnare callback di caricamento in ritardo dopo un cambio canale.
+     */
+    private fun isCurrentAnalyticsEvent(
+        eventTime: AnalyticsListener.EventTime,
+        current: ExoPlayer
+    ): Boolean = current.mediaItemCount > 0 &&
+        eventTime.windowIndex == current.currentMediaItemIndex &&
+        eventTime.timeline == current.currentTimeline
+
     private fun initializePlayer() {
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
@@ -1409,11 +1420,11 @@ class MainActivity : Activity() {
                         loadEventInfo: LoadEventInfo,
                         mediaLoadData: MediaLoadData
                     ) {
-                        if (mediaLoadData.dataType == C.DATA_TYPE_MEDIA) {
+                        if (isCurrentAnalyticsEvent(eventTime, exo) && mediaLoadData.dataType == C.DATA_TYPE_MEDIA) {
                             val duration = loadEventInfo.loadDurationMs
                             val bytes = loadEventInfo.bytesLoaded
                             lastHlsLoad = "segmento ${duration}ms · ${bytes / 1024}KB"
-                        } else if (mediaLoadData.dataType == C.DATA_TYPE_MANIFEST) {
+                        } else if (isCurrentAnalyticsEvent(eventTime, exo) && mediaLoadData.dataType == C.DATA_TYPE_MANIFEST) {
                             lastHlsLoad = "playlist aggiornata"
                         }
                     }
@@ -1425,7 +1436,7 @@ class MainActivity : Activity() {
                         error: IOException,
                         wasCanceled: Boolean
                     ) {
-                        if (!wasCanceled) {
+                        if (!wasCanceled && isCurrentAnalyticsEvent(eventTime, exo)) {
                             val kind = if (mediaLoadData.dataType == C.DATA_TYPE_MANIFEST) "playlist" else "segmento"
                             var cause: Throwable? = error
                             var httpCode: Int? = null
