@@ -1011,6 +1011,14 @@ class MainActivity : Activity() {
         playCloudChannel(channel)
     }
 
+    // I metadati HTTP ricevuti da un deep link esterno valgono solo per quel flusso.
+    // Prima di riprodurre un canale Cloud ripristina il profilo neutro, evitando che
+    // Origin, Referer o User-Agent del canale precedente vengano riutilizzati.
+    private fun resetHlsRequestContext() {
+        hlsHttpDataSourceFactory.setUserAgent(defaultHlsUserAgent)
+        hlsHttpDataSourceFactory.setDefaultRequestProperties(mapOf("Accept" to "*/*"))
+    }
+
     private fun playCloudChannel(channel: CloudChannel) {
         if (!PlayerCloudSync.hasValidLease(this)) {
             stopPlaybackForAuthorization()
@@ -1023,6 +1031,7 @@ class MainActivity : Activity() {
             return
         }
         cancelPendingRecovery()
+        resetHlsRequestContext()
         titleView.text = channel.name
         statusView.text = "Connessione al flusso…"
         selectedChannelForRecovery = channel
@@ -1489,8 +1498,14 @@ class MainActivity : Activity() {
                         if (isPlaying) {
                             lastPlaybackProgressAt = System.currentTimeMillis()
                             bufferingStartedAt = 0L
+                            // Un reset di stabilità appartenente al canale precedente non deve
+                            // azzerare il backoff dopo un cambio rapido di canale.
+                            val stableGeneration = playbackGeneration
                             retryHandler.postDelayed({
-                                if (player?.isPlaying == true) retryCount = 0
+                                if (playbackGeneration == stableGeneration &&
+                                    player === exo && exo.isPlaying) {
+                                    retryCount = 0
+                                }
                             }, 60_000L)
                         } else if (player?.playWhenReady == true && bufferingStartedAt == 0L) {
                             bufferingStartedAt = System.currentTimeMillis()
@@ -1591,6 +1606,11 @@ class MainActivity : Activity() {
         cancelPendingRecovery()
         resumeAfterBackground = player?.playWhenReady == true && (player?.mediaItemCount ?: 0) > 0
         player?.pause()
+        // Il tempo trascorso in background non è buffering: evita riconnessioni
+        // immediate e falsi allarmi al ritorno in primo piano.
+        bufferingStartedAt = 0L
+        lastPlaybackProgressAt = System.currentTimeMillis()
+        lastObservedPositionMs = C.TIME_UNSET
         super.onStop()
     }
 
@@ -1599,6 +1619,9 @@ class MainActivity : Activity() {
         retryHandler.removeCallbacks(diagnosticsTask)
         retryHandler.post(diagnosticsTask)
         if (resumeAfterBackground && (player?.mediaItemCount ?: 0) > 0 && PlayerCloudSync.hasValidLease(this)) {
+            bufferingStartedAt = 0L
+            lastPlaybackProgressAt = System.currentTimeMillis()
+            lastObservedPositionMs = C.TIME_UNSET
             player?.playWhenReady = true
         } else if (!PlayerCloudSync.hasValidLease(this)) {
             stopPlaybackForAuthorization()
