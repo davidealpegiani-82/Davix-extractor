@@ -534,6 +534,7 @@ class MainActivity : Activity() {
                 tvContent.addView(playerContainer)
             }
         } else {
+            root.addView(channelsHeaderView)
             root.addView(channelScroll)
             root.addView(playerContainer)
         }
