@@ -52,6 +52,7 @@ jobs:
             echo "DAVIX_SIGNING_KEY_ALIAS=davix-ci-test" >> "$GITHUB_ENV"
             echo "DAVIX_SIGNING_KEY_PASSWORD=davix-ci-test-key" >> "$GITHUB_ENV"
             echo "build_type=Release" >> "$GITHUB_OUTPUT"
+            echo "stable_signing=false" >> "$GITHUB_OUTPUT"
             echo "Using an ephemeral test key to verify signed release builds; no repository secrets are exposed."
           elif [ -n "$DAVIX_KEYSTORE_BASE64" ] || [ -n "$DAVIX_SIGNING_STORE_PASSWORD" ] || [ -n "$DAVIX_SIGNING_KEY_ALIAS" ] || [ -n "$DAVIX_SIGNING_KEY_PASSWORD" ]; then
             test -n "$DAVIX_KEYSTORE_BASE64" || { echo "Missing DAVIX_KEYSTORE_BASE64"; exit 1; }
@@ -62,9 +63,11 @@ jobs:
             chmod 600 "$RUNNER_TEMP/davix-release.jks"
             echo "DAVIX_SIGNING_STORE_FILE=$RUNNER_TEMP/davix-release.jks" >> "$GITHUB_ENV"
             echo "build_type=Release" >> "$GITHUB_OUTPUT"
+            echo "stable_signing=true" >> "$GITHUB_OUTPUT"
             echo "Stable release signing enabled."
           else
             echo "build_type=Debug" >> "$GITHUB_OUTPUT"
+            echo "stable_signing=false" >> "$GITHUB_OUTPUT"
             echo "::warning::Stable Android signing is not configured; APKs will use temporary debug signing."
           fi
       - name: Build both APKs
@@ -94,7 +97,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
       - name: Publish stable DAVIX Player APK
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.apk-signing.outputs.stable_signing == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: player-lite-latest
