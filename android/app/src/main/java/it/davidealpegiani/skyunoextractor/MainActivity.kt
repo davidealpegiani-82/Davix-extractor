@@ -478,8 +478,10 @@ class MainActivity : FragmentActivity() {
         label("Estrattore playlist e riproduttore HLS nativo", MUTED, 13f)
 
         section("1 · CARICA LA PLAYLIST")
-        label("Seleziona file HTML, HTM, TXT, M3U, M3U8 o JSON. I file vengono letti direttamente sul dispositivo.", MUTED)
-        button("📂  Seleziona file", true) { showImportDestinationDialog() }
+        label("Importa da un file oppure collega direttamente la tua playlist IPTV e la guida XMLTV tramite URL.", MUTED)
+        button("🔗  Configura URL M3U ed EPG", false) { showIptvSourceSettings() }
+        button("🌐  Importa playlist direttamente da URL", true) { importPlaylistFromUrl() }
+        button("📂  Seleziona file", false) { showImportDestinationDialog() }
         status = label("Nessun file caricato.", MUTED)
 
         section("2 · PLAYLIST SALVATE")
@@ -545,6 +547,133 @@ class MainActivity : FragmentActivity() {
         }
         // Mostra subito l'archivio ripristinato, senza richiedere una nuova importazione.
         renderChannels()
+    }
+
+    private fun showIptvSourceSettings() {
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), dp(4))
+        }
+        val playlistInput = EditText(this).apply {
+            hint = "http://server/get.php?...type=m3u_plus"
+            setSingleLine(true)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            transformationMethod = android.text.method.PasswordTransformationMethod.getInstance()
+            setText(IptvSourceSettings.playlistUrl(this@MainActivity))
+        }
+        val epgInput = EditText(this).apply {
+            hint = "http://server/xmltv.php?username=...&password=..."
+            setSingleLine(true)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            transformationMethod = android.text.method.PasswordTransformationMethod.getInstance()
+            setText(IptvSourceSettings.epgUrl(this@MainActivity))
+        }
+        content.addView(labelForDialog("URL PLAYLIST M3U · credenziali nascoste"))
+        content.addView(playlistInput)
+        content.addView(labelForDialog("URL GUIDA XMLTV · credenziali nascoste"))
+        content.addView(epgInput)
+        content.addView(labelForDialog("Gli indirizzi vengono cifrati sul dispositivo. La sorgente XMLTV viene trasferita al Player solo tramite Cloud Sync HTTPS e conservata cifrata anche sul server e sul Player."))
+        AlertDialog.Builder(this)
+            .setTitle("Sorgenti IPTV / EPG")
+            .setView(content)
+            .setNegativeButton("Annulla", null)
+            .setPositiveButton("Salva in modo protetto", null)
+            .create().also { dialog ->
+                dialog.setOnShowListener {
+                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                        try {
+                            IptvSourceSettings.save(
+                                this,
+                                playlistInput.text.toString(),
+                                epgInput.text.toString()
+                            )
+                            dialog.dismiss()
+                            toast("URL M3U ed XMLTV salvati in modo protetto.")
+                        } catch (e: Exception) {
+                            toast(e.message ?: "Indirizzo non valido.")
+                        }
+                    }
+                }
+                dialog.show()
+            }
+    }
+
+    private fun importPlaylistFromUrl() {
+        val address = IptvSourceSettings.playlistUrl(this)
+        if (address.isBlank()) {
+            toast("Configura prima l'URL della playlist M3U.")
+            showIptvSourceSettings()
+            return
+        }
+        status.text = "Download playlist IPTV in corso…"
+        Thread {
+            try {
+                val connection = (URL(address).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 15_000
+                    readTimeout = 60_000
+                    instanceFollowRedirects = true
+                    setRequestProperty("Accept", "audio/x-mpegurl,application/vnd.apple.mpegurl,text/plain,*/*")
+                    setRequestProperty("Accept-Encoding", "identity")
+                    setRequestProperty("User-Agent", "DAVIX-Extractor/1.0")
+                }
+                val bytes = try {
+                    val code = connection.responseCode
+                    if (code !in 200..299) throw IOException("Il server IPTV ha risposto HTTP $code.")
+                    val output = ByteArrayOutputStream()
+                    connection.inputStream.use { input ->
+                        val buffer = ByteArray(32 * 1024)
+                        var total = 0L
+                        while (true) {
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            total += count
+                            if (total > 64L * 1024L * 1024L) throw IOException("La playlist supera il limite di 64 MiB.")
+                            output.write(buffer, 0, count)
+                        }
+                    }
+                    output.toByteArray()
+                } finally {
+                    connection.disconnect()
+                }
+                val text = String(bytes, StandardCharsets.UTF_8).removePrefix("\uFEFF")
+                val found = parseChannels(text)
+                if (found.isEmpty()) throw IllegalStateException("Il collegamento non ha restituito una playlist M3U valida.")
+                restoreChannelCategories(found)
+                found.forEach { channel ->
+                    val savedManualPath = normalizeCategoryPath(channel.category)
+                    val inferred = inferCategoryPath(channel)
+                    channel.category = if (savedManualPath.contains(" > ") && savedManualPath in categories) savedManualPath else inferred
+                    if (channel.category !in categories) categories.add(channel.category)
+                }
+                savePlaylistCopy("playlist-remota.m3u", bytes)
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    var added = 0
+                    var duplicates = 0
+                    found.forEach { channel ->
+                        if (channels.any { it.name.equals(channel.name, true) && it.url == channel.url }) {
+                            duplicates++
+                        } else {
+                            channel.selected = !(channel.name.contains("sky", true) && (channel.name.contains("plus", true) || channel.name.contains("+1")))
+                            channels.add(channel)
+                            if (channel.category !in categories) categories.add(channel.category)
+                            added++
+                        }
+                    }
+                    renderChannels()
+                    renderSavedPlaylists()
+                    status.text = "Playlist URL analizzata · \${found.size} canali letti · \${added} nuovi · \${duplicates} duplicati ignorati."
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        status.text = "Download M3U non riuscito: " + (e.message ?: "errore di rete")
+                        toast(status.text.toString())
+                    }
+                }
+            }
+        }.start()
     }
 
     private fun showCloudSyncSettings() {
@@ -651,7 +780,14 @@ class MainActivity : FragmentActivity() {
                     )
                 }
                 runCloudAdminTask(
-                    task = { CloudSyncAdmin.publish(this, payload, JSONArray(categories)) },
+                    task = {
+                        CloudSyncAdmin.publish(
+                            this,
+                            payload,
+                            JSONArray(categories),
+                            IptvSourceSettings.epgUrl(this).takeIf { it.isNotBlank() }
+                        )
+                    },
                     onSuccess = { result ->
                         status.text = "Pubblicazione completata · versione ${result.optInt("version")} · ${result.optInt("channelCount")} canali."
                         toast(status.text.toString())
