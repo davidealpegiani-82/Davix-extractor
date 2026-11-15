@@ -84,3 +84,21 @@ Se Cloud Sync non è raggiungibile, Player e HTML mantengono la configurazione l
 - Prima di inserire configurazioni con credenziali streaming particolarmente sensibili, va completata una fase di cifratura end-to-end della configurazione.
 - La sincronizzazione trasferisce esclusivamente metadati/configurazione. Ogni Player si collega direttamente alla sorgente HLS e gestisce il proprio buffer Media3 o HLS.js.
 - Le quote gratuite del provider sono soggette a limiti e possono cambiare. Non configurare billing o upgrade automatici; in caso di quota esaurita, il Player deve continuare a usare la cache locale.
+
+## Firma permanente degli APK
+
+Per pubblicare aggiornamenti installabili sopra la versione precedente, entrambi gli APK devono essere firmati sempre con lo stesso keystore. La pipeline supporta una firma release condivisa per Extractor e Player Lite.
+
+1. Generare una sola volta un keystore permanente con alias dedicato, ad esempio:
+   `keytool -genkeypair -v -keystore davix-release.jks -alias davix-release -keyalg RSA -keysize 4096 -validity 10000`
+2. Conservare il file `davix-release.jks` e le password in un password manager e in un backup sicuro. Se si perde il keystore, non sarà più possibile aggiornare le installazioni firmate con quella chiave.
+3. Convertire il file in Base64 senza modificarlo. Su PowerShell:
+   `[Convert]::ToBase64String([IO.File]::ReadAllBytes("davix-release.jks"))`
+4. In GitHub aprire **Settings → Secrets and variables → Actions** e creare questi quattro repository secrets:
+   - `DAVIX_KEYSTORE_BASE64`: contenuto Base64 del keystore
+   - `DAVIX_KEYSTORE_PASSWORD`: password del keystore
+   - `DAVIX_KEY_ALIAS`: alias della chiave (es. `davix-release`)
+   - `DAVIX_KEY_PASSWORD`: password della chiave
+5. Le build avviate da push su `main` useranno la firma release. Le build delle pull request non ricevono i segreti e continuano a usare la firma debug.
+
+**Migrazione iniziale:** gli APK pubblicati finora sono firmati con la chiave debug temporanea del runner CI. La prima installazione della versione firmata con il nuovo keystore richiederà quindi la disinstallazione della vecchia app e una nuova installazione. Prima di farlo, esportare o sincronizzare la configurazione e verificare di poterla recuperare. Dopo questa migrazione, gli aggiornamenti firmati con il keystore permanente potranno essere installati sopra la versione esistente.

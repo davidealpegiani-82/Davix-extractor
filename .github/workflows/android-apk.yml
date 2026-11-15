@@ -36,25 +36,61 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.13"
+      - name: Prepare APK signing
+        id: apk-signing
+        shell: bash
+        env:
+          DAVIX_KEYSTORE_BASE64: ${{ github.event_name != 'pull_request' && secrets.DAVIX_KEYSTORE_BASE64 || '' }}
+          DAVIX_SIGNING_STORE_PASSWORD: ${{ github.event_name != 'pull_request' && secrets.DAVIX_KEYSTORE_PASSWORD || '' }}
+          DAVIX_SIGNING_KEY_ALIAS: ${{ github.event_name != 'pull_request' && secrets.DAVIX_KEY_ALIAS || '' }}
+          DAVIX_SIGNING_KEY_PASSWORD: ${{ github.event_name != 'pull_request' && secrets.DAVIX_KEY_PASSWORD || '' }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            keytool -genkeypair -noprompt -storetype JKS -keystore "$RUNNER_TEMP/davix-ci-test.jks" -storepass "davix-ci-test-store" -keypass "davix-ci-test-key" -alias davix-ci-test -dname "CN=DAVIX CI Test" -keyalg RSA -keysize 2048 -validity 2
+            echo "DAVIX_SIGNING_STORE_FILE=$RUNNER_TEMP/davix-ci-test.jks" >> "$GITHUB_ENV"
+            echo "DAVIX_SIGNING_STORE_PASSWORD=davix-ci-test-store" >> "$GITHUB_ENV"
+            echo "DAVIX_SIGNING_KEY_ALIAS=davix-ci-test" >> "$GITHUB_ENV"
+            echo "DAVIX_SIGNING_KEY_PASSWORD=davix-ci-test-key" >> "$GITHUB_ENV"
+            echo "build_type=Release" >> "$GITHUB_OUTPUT"
+            echo "Using an ephemeral test key to verify signed release builds; no repository secrets are exposed."
+          elif [ -n "$DAVIX_KEYSTORE_BASE64" ] || [ -n "$DAVIX_SIGNING_STORE_PASSWORD" ] || [ -n "$DAVIX_SIGNING_KEY_ALIAS" ] || [ -n "$DAVIX_SIGNING_KEY_PASSWORD" ]; then
+            test -n "$DAVIX_KEYSTORE_BASE64" || { echo "Missing DAVIX_KEYSTORE_BASE64"; exit 1; }
+            test -n "$DAVIX_SIGNING_STORE_PASSWORD" || { echo "Missing DAVIX_KEYSTORE_PASSWORD"; exit 1; }
+            test -n "$DAVIX_SIGNING_KEY_ALIAS" || { echo "Missing DAVIX_KEY_ALIAS"; exit 1; }
+            test -n "$DAVIX_SIGNING_KEY_PASSWORD" || { echo "Missing DAVIX_KEY_PASSWORD"; exit 1; }
+            printf '%s' "$DAVIX_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/davix-release.jks"
+            chmod 600 "$RUNNER_TEMP/davix-release.jks"
+            echo "DAVIX_SIGNING_STORE_FILE=$RUNNER_TEMP/davix-release.jks" >> "$GITHUB_ENV"
+            echo "build_type=Release" >> "$GITHUB_OUTPUT"
+            echo "Stable release signing enabled."
+          else
+            echo "build_type=Debug" >> "$GITHUB_OUTPUT"
+            echo "::warning::Stable Android signing is not configured; APKs will use temporary debug signing."
+          fi
       - name: Build both APKs
         working-directory: android
-        run: gradle --no-daemon :app:assembleDebug :playerlite:assembleDebug
+        env:
+          DAVIX_BUILD_TYPE: ${{ steps.apk-signing.outputs.build_type }}
+        run: gradle --no-daemon ":app:assemble${DAVIX_BUILD_TYPE}" ":playerlite:assemble${DAVIX_BUILD_TYPE}"
       - name: Rename APKs
+        env:
+          DAVIX_BUILD_TYPE: ${{ steps.apk-signing.outputs.build_type }}
         run: |
-          cp "android/app/build/outputs/apk/debug/app-debug.apk" "android/app/build/outputs/apk/debug/DAVIX-Extractor.apk"
-          cp "android/playerlite/build/outputs/apk/debug/playerlite-debug.apk" "android/playerlite/build/outputs/apk/debug/DAVIX-Player.apk"
+          variant="$(echo "$DAVIX_BUILD_TYPE" | tr '[:upper:]' '[:lower:]')"
+          cp "android/app/build/outputs/apk/$variant/app-$variant.apk" "android/app/build/outputs/apk/$variant/DAVIX-Extractor.apk"
+          cp "android/playerlite/build/outputs/apk/$variant/playerlite-$variant.apk" "android/playerlite/build/outputs/apk/$variant/DAVIX-Player.apk"
       - name: Upload DAVIX Extractor APK
         uses: actions/upload-artifact@v4
         with:
           name: DAVIX-Extractor
-          path: "android/app/build/outputs/apk/debug/DAVIX-Extractor.apk"
+          path: "android/app/build/outputs/apk/${{ steps.apk-signing.outputs.build_type == 'Release' && 'release' || 'debug' }}/DAVIX-Extractor.apk"
           if-no-files-found: error
           retention-days: 30
       - name: Upload DAVIX Player APK
         uses: actions/upload-artifact@v4
         with:
           name: DAVIX-Player
-          path: "android/playerlite/build/outputs/apk/debug/DAVIX-Player.apk"
+          path: "android/playerlite/build/outputs/apk/${{ steps.apk-signing.outputs.build_type == 'Release' && 'release' || 'debug' }}/DAVIX-Player.apk"
           if-no-files-found: error
           retention-days: 30
       - name: Publish stable DAVIX Player APK
@@ -66,5 +102,5 @@ jobs:
           prerelease: true
           make_latest: false
           files: |
-            android/app/build/outputs/apk/debug/DAVIX-Extractor.apk
-            android/playerlite/build/outputs/apk/debug/DAVIX-Player.apk
+            android/app/build/outputs/apk/${{ steps.apk-signing.outputs.build_type == 'Release' && 'release' || 'debug' }}/DAVIX-Extractor.apk
+            android/playerlite/build/outputs/apk/${{ steps.apk-signing.outputs.build_type == 'Release' && 'release' || 'debug' }}/DAVIX-Player.apk
