@@ -53,6 +53,7 @@ class MainActivity : Activity() {
     private lateinit var statusView: TextView
     private lateinit var diagnosticsView: TextView
     private lateinit var fullscreenButton: TextView
+    private lateinit var updatesButton: TextView
     private lateinit var fullscreenChannelsButton: TextView
     private lateinit var fullscreenChannelDrawer: LinearLayout
     private lateinit var fullscreenChannelList: LinearLayout
@@ -280,7 +281,17 @@ class MainActivity : Activity() {
             // I controlli non devono riapparire a ogni cambio di focus del PlayerView.
             // Si mostrano solo dopo un input esplicito (telecomando/click) e si nascondono
             // da soli dopo il timeout standard.
-            setOnClickListener { showController() }
+            setOnClickListener {
+                if (isFullscreen) showFullscreenOverlay(autoHide = true, requestFocus = false)
+                else showController()
+            }
+            setOnTouchListener { _, event ->
+                if (!isTvDevice() && isFullscreen && event.action == android.view.MotionEvent.ACTION_DOWN) {
+                    // Qualunque tocco sul video richiama i comandi, anche dopo il timeout.
+                    showFullscreenOverlay(autoHide = true, requestFocus = false)
+                }
+                false
+            }
             useController = true
             controllerAutoShow = false
             controllerShowTimeoutMs = 5_000
@@ -303,7 +314,7 @@ class MainActivity : Activity() {
         controls.addView(diagnosticsView)
         diagnosticsView.visibility = if (PlayerCloudSync.hasValidLease(this)) View.VISIBLE else View.GONE
 
-        val updatesButton = TextView(this).apply {
+        updatesButton = TextView(this).apply {
             text = "⬇  AGGIORNAMENTI DAVIX"
             textSize = 13f
             gravity = Gravity.CENTER
@@ -1155,6 +1166,7 @@ class MainActivity : Activity() {
             pairButton.visibility = View.GONE
             cloudStatusView.visibility = View.GONE
             epgStatusView.visibility = View.GONE
+            updatesButton.visibility = View.GONE
             channelScroll.visibility = View.GONE
             cloudHeaderView.visibility = View.GONE
             channelsHeaderView.visibility = View.GONE
@@ -1193,6 +1205,7 @@ class MainActivity : Activity() {
             }
             cloudStatusView.visibility = View.VISIBLE
             epgStatusView.visibility = View.VISIBLE
+            updatesButton.visibility = View.VISIBLE
             channelScroll.visibility = View.VISIBLE
             cloudHeaderView.visibility = View.GONE
             channelsHeaderView.visibility = if (PlayerCloudSync.hasValidLease(this)) View.VISIBLE else View.GONE
