@@ -159,6 +159,16 @@ async function readJson(request: Request, maxBytes = 1_000_000): Promise<any> {
   }
 }
 
+function validHttpUrl(value: unknown): value is string {
+  if (typeof value !== "string" || !value.trim() || value.length > 8192) return false;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 function validChannel(channel: any): channel is Channel {
   if (!channel || typeof channel !== "object") return false;
   if (typeof channel.name !== "string" || !channel.name.trim() || channel.name.length > 160) return false;
@@ -364,7 +374,7 @@ async function route(request: Request, env: Env): Promise<Response> {
     if (!body || body.schemaVersion !== 1 || !Array.isArray(body.channels) || body.channels.length > 1000 ||
         typeof body.updateId !== "string" || body.updateId.length < 8 || body.updateId.length > 100 ||
         !body.channels.every(validChannel) ||
-        (body.epgSourceUrl != null && (typeof body.epgSourceUrl !== "string" || body.epgSourceUrl.length > 8192 ||
+        (body.epgSourceUrl != null && !validHttpUrl(body.epgSourceUrl)) ||
           !/^https?:\\/\\//i.test(body.epgSourceUrl) || (() => { try { const parsed = new URL(body.epgSourceUrl); return parsed.protocol !== "http:" && parsed.protocol !== "https:"; } catch { return true; } })())) ||
         (body.categories != null && (!Array.isArray(body.categories) || body.categories.length > 100 ||
           !body.categories.every((category: unknown) => typeof category === "string" && category.trim().length > 0 && category.length <= 80)))) {
