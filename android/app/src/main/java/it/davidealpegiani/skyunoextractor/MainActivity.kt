@@ -639,16 +639,16 @@ class MainActivity : FragmentActivity() {
                 val text = String(bytes, StandardCharsets.UTF_8).removePrefix("\uFEFF")
                 val found = parseChannels(text)
                 if (found.isEmpty()) throw IllegalStateException("Il collegamento non ha restituito una playlist M3U valida.")
-                restoreChannelCategories(found)
-                found.forEach { channel ->
-                    val savedManualPath = normalizeCategoryPath(channel.category)
-                    val inferred = inferCategoryPath(channel)
-                    channel.category = if (savedManualPath.contains(" > ") && savedManualPath in categories) savedManualPath else inferred
-                    if (channel.category !in categories) categories.add(channel.category)
-                }
                 savePlaylistCopy("playlist-remota.m3u", bytes)
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
+                    restoreChannelCategories(found)
+                    found.forEach { channel ->
+                        val savedManualPath = normalizeCategoryPath(channel.category)
+                        val inferred = inferCategoryPath(channel)
+                        channel.category = if (savedManualPath.contains(" > ") && savedManualPath in categories) savedManualPath else inferred
+                        if (channel.category !in categories) categories.add(channel.category)
+                    }
                     var added = 0
                     var duplicates = 0
                     found.forEach { channel ->
