@@ -137,6 +137,7 @@ class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         loadCategorySettings()
+        restoreChannelLibrary()
         window.statusBarColor = BG
         window.navigationBarColor = BG
         window.decorView.systemUiVisibility = 0
@@ -542,6 +543,8 @@ class MainActivity : FragmentActivity() {
         button("⬇  Aggiornamenti DAVIX", false) {
             (application as DavixUpdaterApplication).showDownloads(this@MainActivity)
         }
+        // Mostra subito l'archivio ripristinato, senza richiedere una nuova importazione.
+        renderChannels()
     }
 
     private fun showCloudSyncSettings() {
@@ -1276,6 +1279,7 @@ class MainActivity : FragmentActivity() {
 
     private fun renderChannels() {
         saveCategorySettings()
+        persistChannelLibrary()
         selectedList.removeAllViews()
         otherList.removeAllViews()
         val selected = channels.withIndex().filter { it.value.selected }
@@ -1492,6 +1496,65 @@ class MainActivity : FragmentActivity() {
         }.setNegativeButton("Indietro", null).show()
     }
 
+    private fun channelLibraryFile(): java.io.File =
+        java.io.File(filesDir, "channel_library_v1.json")
+
+    /** Salva canali, selezione export, categorie e cartelle aperte. */
+    private fun persistChannelLibrary() {
+        runCatching {
+            val savedChannels = JSONArray()
+            channels.forEach { channel ->
+                savedChannels.put(JSONObject().apply {
+                    put("name", channel.name)
+                    put("url", channel.url)
+                    put("logo", channel.logo)
+                    put("selected", channel.selected)
+                    put("category", channel.category)
+                    put("tvgId", channel.tvgId)
+                    put("tvgName", channel.tvgName)
+                })
+            }
+            val expanded = JSONArray().apply { expandedCategoryPaths.forEach { put(it) } }
+            val state = JSONObject().apply {
+                put("version", 1)
+                put("channels", savedChannels)
+                put("expandedCategories", expanded)
+                put("savedAt", System.currentTimeMillis())
+            }
+            channelLibraryFile().writeText(state.toString(), StandardCharsets.UTF_8)
+        }.onFailure {
+            Log.w("DAVIX-ARCHIVE", "Salvataggio archivio canali non riuscito", it)
+        }
+    }
+
+    /** Ripristina i canali prima di costruire l’interfaccia. */
+    private fun restoreChannelLibrary() {
+        val file = channelLibraryFile()
+        if (!file.isFile) return
+        runCatching {
+            val state = JSONObject(file.readText(StandardCharsets.UTF_8))
+            val savedChannels = state.optJSONArray("channels") ?: JSONArray()
+            val restored = mutableListOf<TvChannel>()
+            for (i in 0 until savedChannels.length()) {
+                val item = savedChannels.optJSONObject(i) ?: continue
+                val name = item.optString("name").trim()
+                val url = item.optString("url").trim()
+                if (name.isBlank() || !(url.startsWith("https://", true) || url.startsWith("http://", true))) continue
+                val category = normalizeCategoryPath(item.optString("category", "Non classificati")).ifBlank { "Non classificati" }
+                restored.add(TvChannel(name, url, item.optString("logo"), item.optBoolean("selected", true), category, item.optString("tvgId"), item.optString("tvgName")))
+                if (category !in categories) categories.add(category)
+            }
+            channels.clear()
+            channels.addAll(restored)
+            expandedCategoryPaths.clear()
+            val expanded = state.optJSONArray("expandedCategories") ?: JSONArray()
+            for (i in 0 until expanded.length()) expanded.optString(i).takeIf { it.isNotBlank() }?.let { expandedCategoryPaths.add(it) }
+            Log.i("DAVIX-ARCHIVE", "Ripristinati " + channels.size + " canali dall’archivio locale")
+        }.onFailure {
+            Log.e("DAVIX-ARCHIVE", "Archivio canali non leggibile; file conservato per diagnosi", it)
+        }
+    }
+
     private fun loadCategorySettings() {
         val saved = categoryPrefs.getString("categories_json", null)
         if (!saved.isNullOrBlank()) runCatching {
@@ -1649,6 +1712,8 @@ class MainActivity : FragmentActivity() {
     }
 
     override fun onStop() {
+        persistChannelLibrary()
+        saveCategorySettings()
         retryHandler.removeCallbacks(playbackInfoTask)
         // Non lasciare il flusso attivo quando l'app passa davvero in background.
         // Il cambio orientamento è gestito da configChanges nel manifest.
