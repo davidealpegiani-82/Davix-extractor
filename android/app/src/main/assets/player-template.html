@@ -137,16 +137,10 @@ function clearCloudAuthorization(){try{localStorage.removeItem(CLOUD_STORAGE_KEY
 function randomToken(){const bytes=new Uint8Array(32);crypto.getRandomValues(bytes);let raw='';bytes.forEach(v=>raw+=String.fromCharCode(v));return btoa(raw).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'')}
 function randomId(){const bytes=new Uint8Array(16);crypto.getRandomValues(bytes);return Array.from(bytes,v=>v.toString(16).padStart(2,'0')).join('')}
 async function cloudRequest(path,options={}){const res=await fetch(CLOUD_SYNC_URL+path,options);let data={};try{data=await res.json()}catch(e){}if(!res.ok)throw new Error(data.error||('HTTP '+res.status));return data}
-const list=document.getElementById('list');
 const listTitle=document.getElementById('listTitle');
-const cloudButton=document.getElementById('cloudPair');
-const cloudStatus=document.getElementById('cloudStatus');
 const epgStatus=document.getElementById('epgStatus');
-const CLOUD_STORAGE_KEY='sky-player-cloud-sync-v2';
 const EPG_CACHE_KEY='davix_html_epg_cache_v1';
 const FAVORITES_KEY='davix_html_favorites_v1';
-const activationInput=document.getElementById('activationCode');
-let lastCloudCheck=0;
 let expandedCategoryKey='';
 let favoriteUrls=new Set();
 let epgGuides={};
