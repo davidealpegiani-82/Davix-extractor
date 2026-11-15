@@ -7,6 +7,11 @@ const lite = readFileSync('android/playerlite/src/main/java/it/davidealpegiani/s
 const extractorKotlin = readFileSync('android/app/src/main/java/it/davidealpegiani/skyunoextractor/MainActivity.kt', 'utf8');
 const epgManager = readFileSync('android/playerlite/src/main/java/it/davidealpegiani/skylite/EpgGuideManager.kt', 'utf8');
 const playerCloudSync = readFileSync('android/playerlite/src/main/java/it/davidealpegiani/skylite/PlayerCloudSync.kt', 'utf8');
+assert.match(epgManager, /MAX_DECOMPRESSED_BYTES = 48L \* 1024L \* 1024L/, 'EPG downloads must be capped after decompression');
+assert.match(epgManager, /LimitedInputStream\(decompressed, MAX_DECOMPRESSED_BYTES\)/, 'EPG parser must never consume an unbounded XMLTV stream');
+assert.match(epgManager, /MAX_CHANNELS = 20_000/, 'EPG parser must cap channel metadata');
+assert.match(epgManager, /MAX_PROGRAMMES = 300_000/, 'EPG parser must cap total programme entries');
+assert.match(epgManager, /MAX_PROGRAMMES_PER_CHANNEL = 2_000/, 'EPG parser must cap per-channel programme entries');
 const liteManifest = readFileSync('android/playerlite/src/main/AndroidManifest.xml', 'utf8');
 const web = readFileSync('index.html', 'utf8');
 const cloudSync = readFileSync('cloud-sync/src/index.ts', 'utf8');
