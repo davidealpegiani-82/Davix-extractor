@@ -175,7 +175,7 @@ internal object EpgGuideManager {
     }
 
     private fun normalize(value: String): String = value.lowercase(Locale.ROOT)
-        .replace(Regex("\\b(hd|fhd|uhd|4k|hevc|1080p|720p|sd)\\b"), " ")
+        .replace(Regex("\\b(full|hd|fhd|uhd|4k|hevc|h\\.?265|h\\.?264|1080p|720p|sd)\\b"), " ")
         .replace(Regex("[^\\p{L}\\p{N}+]+"), " ").trim().replace(Regex("\\s+"), " ")
 
     private fun similarity(a: String, b: String): Double {
