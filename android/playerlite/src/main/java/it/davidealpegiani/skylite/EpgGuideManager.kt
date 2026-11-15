@@ -5,6 +5,7 @@ import android.util.Xml
 import org.json.JSONObject
 import org.xmlpull.v1.XmlPullParser
 import java.io.BufferedInputStream
+import java.io.FilterInputStream
 import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
@@ -31,6 +32,15 @@ internal object EpgGuideManager {
     private const val REFRESH_INTERVAL_MS = 6L * 60L * 60L * 1000L
     private const val NO_MATCH_RETRY_INTERVAL_MS = 30L * 60L * 1000L
 
+    // Limiti applicati dopo la decompressione: una sorgente XMLTV malformata
+    // o sproporzionata non deve poter esaurire la memoria di Android TV.
+    private const val MAX_DECOMPRESSED_BYTES = 48L * 1024L * 1024L
+    private const val MAX_CHANNELS = 20_000
+    private const val MAX_PROGRAMMES = 300_000
+    private const val MAX_PROGRAMMES_PER_CHANNEL = 2_000
+    private const val MAX_DISPLAY_NAME_LENGTH = 160
+    private const val MAX_PROGRAMME_TITLE_LENGTH = 300
+
     // Fonti indipendenti: la guida Sky ha priorità sui canali Sky; le altre
     // fonti completano i canali e gli orari mancanti. I download partono insieme.
     private val sources = listOf(
@@ -42,6 +52,29 @@ internal object EpgGuideManager {
     )
 
     private data class Program(val start: Long, val stop: Long, val title: String)
+
+    private class LimitedInputStream(input: InputStream, private val maxBytes: Long) : FilterInputStream(input) {
+        private var bytesRead = 0L
+
+        private fun account(count: Int): Int {
+            if (count > 0) {
+                bytesRead += count
+                if (bytesRead > maxBytes) {
+                    throw IllegalStateException("La guida XMLTV supera il limite di dimensione consentito.")
+                }
+            }
+            return count
+        }
+
+        override fun read(): Int {
+            val value = super.read()
+            if (value >= 0) account(1)
+            return value
+        }
+
+        override fun read(buffer: ByteArray, offset: Int, length: Int): Int =
+            account(super.read(buffer, offset, length))
+    }
     private data class Dataset(val channelNames: Map<String, List<String>>, val programs: Map<String, List<Program>>)
 
     fun shouldRefresh(context: Context, channels: List<EpgChannelInput>): Boolean {
@@ -213,8 +246,8 @@ internal object EpgGuideManager {
             val first = buffered.read()
             val second = buffered.read()
             buffered.reset()
-            val stream: InputStream = if (first == 0x1f && second == 0x8b) GZIPInputStream(buffered) else buffered
-            stream.use { return parse(it) }
+            val decompressed: InputStream = if (first == 0x1f && second == 0x8b) GZIPInputStream(buffered) else buffered
+            LimitedInputStream(decompressed, MAX_DECOMPRESSED_BYTES).use { return parse(it) }
         } finally {
             connection.disconnect()
         }
@@ -227,6 +260,7 @@ internal object EpgGuideManager {
         val names = linkedMapOf<String, List<String>>()
         val programmes = linkedMapOf<String, MutableList<Program>>()
         val now = System.currentTimeMillis()
+        var programmeCount = 0
         var event = parser.eventType
         while (event != XmlPullParser.END_DOCUMENT) {
             if (event == XmlPullParser.START_TAG) when (parser.name) {
@@ -238,7 +272,12 @@ internal object EpgGuideManager {
                         if (inner == XmlPullParser.END_TAG && parser.name == "channel") break
                         if (inner == XmlPullParser.START_TAG && parser.name == "display-name") parser.nextText().trim().takeIf { it.isNotBlank() }?.let(displayNames::add)
                     }
-                    if (id.isNotBlank() && displayNames.isNotEmpty()) names[id] = displayNames
+                    if (id.isNotBlank() && displayNames.isNotEmpty()) {
+                        if (id !in names && names.size >= MAX_CHANNELS) {
+                            throw IllegalStateException("La guida XMLTV contiene troppi canali.")
+                        }
+                        names[id] = displayNames.take(20).map { it.take(MAX_DISPLAY_NAME_LENGTH) }
+                    }
                 }
                 "programme" -> {
                     val id = parser.getAttributeValue(null, "channel").orEmpty()
@@ -252,7 +291,14 @@ internal object EpgGuideManager {
                         else if (inner == XmlPullParser.START_TAG && parser.name == "desc") parser.nextText()
                     }
                     if (id.isNotBlank() && title.isNotBlank() && start != null && stop != null && stop > now && start < now + 48L * 60L * 60L * 1000L) {
-                        programmes.getOrPut(id) { mutableListOf() }.add(Program(start, stop, title))
+                        val channelProgrammes = programmes.getOrPut(id) { mutableListOf() }
+                        if (channelProgrammes.size < MAX_PROGRAMMES_PER_CHANNEL) {
+                            programmeCount++
+                            if (programmeCount > MAX_PROGRAMMES) {
+                                throw IllegalStateException("La guida XMLTV contiene troppi programmi.")
+                            }
+                            channelProgrammes.add(Program(start, stop, title.take(MAX_PROGRAMME_TITLE_LENGTH)))
+                        }
                     }
                 }
             }
