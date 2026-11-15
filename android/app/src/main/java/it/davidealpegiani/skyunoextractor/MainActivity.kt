@@ -663,7 +663,7 @@ class MainActivity : FragmentActivity() {
                     }
                     renderChannels()
                     renderSavedPlaylists()
-                    status.text = "Playlist URL analizzata · \${found.size} canali letti · \${added} nuovi · \${duplicates} duplicati ignorati."
+                    status.text = "Playlist URL analizzata · " + found.size + " canali letti · " + added + " nuovi · " + duplicates + " duplicati ignorati."
                 }
             } catch (e: Exception) {
                 runOnUiThread {
