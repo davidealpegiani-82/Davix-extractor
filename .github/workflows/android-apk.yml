@@ -138,7 +138,7 @@ jobs:
               "extractor": {**extractor, "apkUrl": base + "DAVIX-Extractor.apk"},
               "player": {**player, "apkUrl": base + "DAVIX-Player.apk"}
           }
-          Path("android/dist/version.json").write_text(json.dumps(manifest, indent=2) + "\\n")
+          Path("android/dist/version.json").write_text(json.dumps(manifest, indent=2) + "\n")
           print(Path("android/dist/version.json").read_text())
           PY
       - name: Upload DAVIX Extractor APK
