@@ -303,6 +303,23 @@ class MainActivity : Activity() {
         controls.addView(diagnosticsView)
         diagnosticsView.visibility = if (PlayerCloudSync.hasValidLease(this)) View.VISIBLE else View.GONE
 
+        val updatesButton = TextView(this).apply {
+            text = "⬇  AGGIORNAMENTI DAVIX"
+            textSize = 13f
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setPadding(dp(16), dp(13), dp(16), dp(13))
+            isClickable = true
+            isFocusable = true
+            setBackground(channelActionBackground())
+            setOnFocusChangeListener { _, focused -> background = channelActionBackground(focused) }
+            setOnClickListener { (application as DavixUpdaterApplication).showDownloads(this@MainActivity) }
+        }
+        controls.addView(updatesButton, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply { setMargins(dp(12), dp(8), dp(12), dp(4)) })
+
         cloudHeaderView = TextView(this).apply {
             text = "☁  SINCRONIZZAZIONE CLOUD"
             setTextColor(Color.rgb(112, 196, 220))

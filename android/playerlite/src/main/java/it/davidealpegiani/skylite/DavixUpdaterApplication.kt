@@ -12,6 +12,10 @@ class DavixUpdaterApplication : Application(), Application.ActivityLifecycleCall
         registerActivityLifecycleCallbacks(this)
     }
 
+    fun showDownloads(activity: Activity) {
+        updater.showDownloads(activity)
+    }
+
     override fun onActivityResumed(activity: Activity) {
         if (activity.javaClass.name == "it.davidealpegiani.skylite.MainActivity") updater.check(activity)
     }

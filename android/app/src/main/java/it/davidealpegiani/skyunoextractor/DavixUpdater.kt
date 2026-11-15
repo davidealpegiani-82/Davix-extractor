@@ -102,6 +102,59 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
         }
     }
 
+
+    fun showDownloads(activity: Activity) {
+        activeActivity = activity
+        executor.execute {
+            try {
+                val connection = (URL(MANIFEST_URL).openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 12000
+                    readTimeout = 12000
+                    setRequestProperty("Accept", "application/json")
+                    setRequestProperty("Cache-Control", "no-cache")
+                }
+                val manifest = connection.inputStream.bufferedReader().use { it.readText() }
+                connection.disconnect()
+                val item = JSONObject(manifest).getJSONObject(appKey)
+                val latestCode = item.getLong("versionCode")
+                val latestName = item.getString("versionName")
+                val apkUrl = item.getString("apkUrl")
+                val packageInfo = app.packageManager.getPackageInfo(app.packageName, 0)
+                val currentCode = if (Build.VERSION.SDK_INT >= 28) packageInfo.longVersionCode else {
+                    @Suppress("DEPRECATION")
+                    packageInfo.versionCode.toLong()
+                }
+                val currentName = packageInfo.versionName ?: "sconosciuta"
+                main.post {
+                    if (activity.isFinishing || activity.isDestroyed) return@post
+                    val updateAvailable = latestCode > currentCode
+                    val message = if (updateAvailable) {
+                        "Versione installata: $currentName\nNuova versione disponibile: $latestName\n\nPuoi scaricare direttamente l'APK e aggiornare questa app. I dati e l'attivazione vengono mantenuti."
+                    } else {
+                        "Versione installata: $currentName\nUltima versione pubblicata: $latestName\n\nDAVIX è aggiornato. Puoi comunque scaricare nuovamente il pacchetto APK da qui."
+                    }
+                    AlertDialog.Builder(activity)
+                        .setTitle("Aggiornamenti DAVIX")
+                        .setMessage(message)
+                        .setNegativeButton("Chiudi", null)
+                        .setPositiveButton(if (updateAvailable) "Scarica e aggiorna" else "Scarica APK") { _, _ ->
+                            downloadUpdate(activity, latestName, apkUrl)
+                        }
+                        .show()
+                }
+            } catch (_: Exception) {
+                main.post {
+                    if (activity.isFinishing || activity.isDestroyed) return@post
+                    AlertDialog.Builder(activity)
+                        .setTitle("Aggiornamenti DAVIX")
+                        .setMessage("Non riesco a raggiungere il servizio degli aggiornamenti. Riprova quando la connessione è disponibile.")
+                        .setPositiveButton("OK", null)
+                        .show()
+                }
+            }
+        }
+    }
+
     private fun downloadUpdate(activity: Activity, versionName: String, apkUrl: String) {
         try {
             val fileName = "DAVIX-$appKey-$versionName.apk"
