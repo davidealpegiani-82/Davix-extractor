@@ -18,10 +18,6 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      DAVIX_SIGNING_STORE_PASSWORD: ${{ secrets.DAVIX_KEYSTORE_PASSWORD }}
-      DAVIX_SIGNING_KEY_ALIAS: ${{ secrets.DAVIX_KEY_ALIAS }}
-      DAVIX_SIGNING_KEY_PASSWORD: ${{ secrets.DAVIX_KEY_PASSWORD }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -40,7 +36,10 @@ jobs:
         id: apk-signing
         shell: bash
         env:
-          DAVIX_KEYSTORE_BASE64: ${{ secrets.DAVIX_KEYSTORE_BASE64 }}
+          DAVIX_KEYSTORE_BASE64: ${{ github.event_name != 'pull_request' && secrets.DAVIX_KEYSTORE_BASE64 || '' }}
+          DAVIX_SIGNING_STORE_PASSWORD: ${{ github.event_name != 'pull_request' && secrets.DAVIX_KEYSTORE_PASSWORD || '' }}
+          DAVIX_SIGNING_KEY_ALIAS: ${{ github.event_name != 'pull_request' && secrets.DAVIX_KEY_ALIAS || '' }}
+          DAVIX_SIGNING_KEY_PASSWORD: ${{ github.event_name != 'pull_request' && secrets.DAVIX_KEY_PASSWORD || '' }}
         run: |
           if [ -n "$DAVIX_KEYSTORE_BASE64" ] || [ -n "$DAVIX_SIGNING_STORE_PASSWORD" ] || [ -n "$DAVIX_SIGNING_KEY_ALIAS" ] || [ -n "$DAVIX_SIGNING_KEY_PASSWORD" ]; then
             test -n "$DAVIX_KEYSTORE_BASE64" || { echo "Missing DAVIX_KEYSTORE_BASE64"; exit 1; }
