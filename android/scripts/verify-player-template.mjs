@@ -51,7 +51,7 @@ assert.match(template, /setInterval\(\(\)=>\{[\s\S]*?ensureHlsLoading\(\);checkB
 assert.match(template, /function recoverNetwork\(reason\)/, 'fatal HLS network errors must have a dedicated recovery path');
 assert.match(template, /hls\.startLoad\(-1\)/, 'network recovery must restart HLS loading without recreating the player');
 assert.match(template, /networkRetryCount=0;recovering=false;checkBufferPolicy\(\)/, 'successful buffered fragments must clear the network recovery state');
-assert.match(template, /e\.type===Hls\.ErrorTypes\.MEDIA_ERROR[\s\S]*?hls\.recoverMediaError\(\)/, 'fatal media errors must use HLS media recovery');
+assert.match(template, /e\.type===Hls\.ErrorTypes\.MEDIA_ERROR[\s\S]*?(?:hls|instance)\.recoverMediaError\(\)/, 'fatal media errors must use the active HLS instance for media recovery');
 assert.match(template, /maxBufferLength:90/);
 assert.match(template, /maxMaxBufferLength:90/);
 assert.match(template, /fullscreenBtn/);
