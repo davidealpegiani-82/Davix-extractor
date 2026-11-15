@@ -32,24 +32,45 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
     private var receiverRegistered = false
     private var checkedThisProcess = false
 
+    private var activityResumed = false
+
     private val downloadReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             if (intent.action != DownloadManager.ACTION_DOWNLOAD_COMPLETE) return
             val id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L)
-            if (id != activeDownloadId) return
+            if (id != prefs.getLong("pending_download_id", -1L)) return
             val manager = app.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-            val query = DownloadManager.Query().setFilterById(id)
-            manager.query(query).use { cursor ->
+            manager.query(DownloadManager.Query().setFilterById(id)).use { cursor ->
                 if (!cursor.moveToFirst()) return
                 val status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
                 if (status == DownloadManager.STATUS_SUCCESSFUL) {
-                    val path = prefs.getString("pending_apk_path", null)
-                    if (path != null) main.post { activeActivity?.let { installOrRequestPermission(it, File(path)) } }
+                    prefs.edit().putBoolean("download_completed", true).apply()
+                    main.post {
+                        val current = activeActivity
+                        if (activityResumed && current != null && !current.isFinishing && !current.isDestroyed) {
+                            resumePendingInstall(current)
+                        }
+                    }
                 } else {
-                    main.post { activeActivity?.let { Toast.makeText(it, "Download aggiornamento non riuscito", Toast.LENGTH_LONG).show() } }
+                    main.post {
+                        val current = activeActivity
+                        if (activityResumed && current != null && !current.isFinishing && !current.isDestroyed) {
+                            Toast.makeText(current, "Download aggiornamento non riuscito", Toast.LENGTH_LONG).show()
+                        }
+                    }
                 }
             }
         }
+    }
+
+    fun onActivityResumed(activity: Activity) {
+        activeActivity = activity
+        activityResumed = true
+        check(activity)
+    }
+
+    fun onActivityPaused(activity: Activity) {
+        if (activeActivity === activity) activityResumed = false
     }
 
     fun check(activity: Activity) {
@@ -191,15 +212,26 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
             }
         }
         val file = File(path)
+        val waitingForPermission = prefs.getBoolean("awaiting_install_permission", false)
+        val canInstall = Build.VERSION.SDK_INT < 26 || activity.packageManager.canRequestPackageInstalls()
+        if (waitingForPermission) {
+            prefs.edit().putBoolean("awaiting_install_permission", false).apply()
+            if (!canInstall) {
+                Toast.makeText(activity, "Per installare l'aggiornamento, consenti a DAVIX di installare app da questa origine e torna qui.", Toast.LENGTH_LONG).show()
+                return
+            }
+        }
         if (file.exists() && file.length() > 0L) installOrRequestPermission(activity, file)
     }
 
     private fun installOrRequestPermission(activity: Activity, file: File) {
         if (Build.VERSION.SDK_INT >= 26 && !activity.packageManager.canRequestPackageInstalls()) {
             try {
+                prefs.edit().putBoolean("awaiting_install_permission", true).apply()
                 activity.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${activity.packageName}")))
-                Toast.makeText(activity, "Consenti a DAVIX di installare aggiornamenti, poi torna all'app", Toast.LENGTH_LONG).show()
+                Toast.makeText(activity, "Consenti a DAVIX di installare aggiornamenti. Al ritorno, l'installazione si aprirà automaticamente.", Toast.LENGTH_LONG).show()
             } catch (_: Exception) {
+                prefs.edit().putBoolean("awaiting_install_permission", false).apply()
                 Toast.makeText(activity, "Abilita l'installazione da questa app nelle impostazioni Android", Toast.LENGTH_LONG).show()
             }
             return
@@ -211,7 +243,10 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
             activity.startActivity(intent)
-            prefs.edit().putBoolean("installer_launched", true).apply()
+            prefs.edit()
+                .putBoolean("installer_launched", true)
+                .putBoolean("download_completed", false)
+                .apply()
         } catch (_: Exception) {
             Toast.makeText(activity, "Non è stato possibile aprire il programma di installazione Android", Toast.LENGTH_LONG).show()
         }
