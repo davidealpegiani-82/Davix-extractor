@@ -129,9 +129,9 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
                     if (activity.isFinishing || activity.isDestroyed) return@post
                     val updateAvailable = latestCode > currentCode
                     val message = if (updateAvailable) {
-                        "Versione installata: $currentName\\nNuova versione disponibile: $latestName\\n\\nPuoi scaricare direttamente l'APK e aggiornare questa app. I dati e l'attivazione vengono mantenuti."
+                        "Versione installata: $currentName\nNuova versione disponibile: $latestName\n\nPuoi scaricare direttamente l'APK e aggiornare questa app. I dati e l'attivazione vengono mantenuti."
                     } else {
-                        "Versione installata: $currentName\\nUltima versione pubblicata: $latestName\\n\\nDAVIX è aggiornato. Puoi comunque scaricare nuovamente il pacchetto APK da qui."
+                        "Versione installata: $currentName\nUltima versione pubblicata: $latestName\n\nDAVIX è aggiornato. Puoi comunque scaricare nuovamente il pacchetto APK da qui."
                     }
                     AlertDialog.Builder(activity)
                         .setTitle("Aggiornamenti DAVIX")
