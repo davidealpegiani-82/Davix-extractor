@@ -1011,6 +1011,14 @@ class MainActivity : Activity() {
         playCloudChannel(channel)
     }
 
+    // I metadati HTTP ricevuti da un deep link esterno valgono solo per quel flusso.
+    // Prima di riprodurre un canale Cloud ripristina il profilo neutro, evitando che
+    // Origin, Referer o User-Agent del canale precedente vengano riutilizzati.
+    private fun resetHlsRequestContext() {
+        hlsHttpDataSourceFactory.setUserAgent(defaultHlsUserAgent)
+        hlsHttpDataSourceFactory.setDefaultRequestProperties(mapOf("Accept" to "*/*"))
+    }
+
     private fun playCloudChannel(channel: CloudChannel) {
         if (!PlayerCloudSync.hasValidLease(this)) {
             stopPlaybackForAuthorization()
@@ -1023,6 +1031,7 @@ class MainActivity : Activity() {
             return
         }
         cancelPendingRecovery()
+        resetHlsRequestContext()
         titleView.text = channel.name
         statusView.text = "Connessione al flusso…"
         selectedChannelForRecovery = channel
