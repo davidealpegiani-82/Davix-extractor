@@ -30,6 +30,7 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
     private var activeActivity: Activity? = null
     private var activeDownloadId = -1L
     private var receiverRegistered = false
+    private var checkedThisProcess = false
 
     private val downloadReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -54,8 +55,9 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
     fun check(activity: Activity) {
         activeActivity = activity
         resumePendingInstall(activity)
-        if (prefs.getBoolean("checked_this_process", false)) return
-        prefs.edit().putBoolean("checked_this_process", true).apply()
+        if (checkedThisProcess) return
+        checkedThisProcess = true
+        activeDownloadId = prefs.getLong("pending_download_id", -1L)
         if (!receiverRegistered) {
             val filter = IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE)
             if (Build.VERSION.SDK_INT >= 33) app.registerReceiver(downloadReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
@@ -116,6 +118,7 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
             prefs.edit()
                 .putLong("pending_download_id", id)
                 .putString("pending_apk_path", destination.absolutePath)
+                .putBoolean("installer_launched", false)
                 .apply()
             Toast.makeText(activity, "Download aggiornamento avviato", Toast.LENGTH_SHORT).show()
         } catch (_: Exception) {
@@ -124,7 +127,16 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
     }
 
     private fun resumePendingInstall(activity: Activity) {
+        if (prefs.getBoolean("installer_launched", false)) return
         val path = prefs.getString("pending_apk_path", null) ?: return
+        val id = prefs.getLong("pending_download_id", -1L)
+        if (id > 0L) {
+            val manager = app.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+            manager.query(DownloadManager.Query().setFilterById(id)).use { cursor ->
+                if (!cursor.moveToFirst()) return
+                if (cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)) != DownloadManager.STATUS_SUCCESSFUL) return
+            }
+        }
         val file = File(path)
         if (file.exists() && file.length() > 0L) installOrRequestPermission(activity, file)
     }
@@ -146,6 +158,7 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
             activity.startActivity(intent)
+            prefs.edit().putBoolean("installer_launched", true).apply()
         } catch (_: Exception) {
             Toast.makeText(activity, "Non è stato possibile aprire il programma di installazione Android", Toast.LENGTH_LONG).show()
         }
