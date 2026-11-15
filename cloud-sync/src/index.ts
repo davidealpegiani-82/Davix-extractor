@@ -313,12 +313,12 @@ async function route(request: Request, env: Env): Promise<Response> {
       : [];
     const payload = JSON.stringify({ schemaVersion: 1, updateId: body.updateId, categories, channels: body.channels });
     const checksum = await sha256(payload);
-    const current = await env.DB.prepare("SELECT version FROM config WHERE config_id = 1").first<{ version: number }>();
-    const version = (current?.version || 0) + 1;
     const publishedAt = Date.now();
-    await env.DB.prepare(
-      "INSERT INTO config (config_id, version, update_id, payload, checksum, published_at) VALUES (1, ?, ?, ?, ?, ?) ON CONFLICT(config_id) DO UPDATE SET version = excluded.version, update_id = excluded.update_id, payload = excluded.payload, checksum = excluded.checksum, published_at = excluded.published_at"
-    ).bind(version, body.updateId, payload, checksum, publishedAt).run();
+    const published = await env.DB.prepare(
+      "INSERT INTO config (config_id, version, update_id, payload, checksum, published_at) VALUES (1, 1, ?, ?, ?, ?) ON CONFLICT(config_id) DO UPDATE SET version = config.version + 1, update_id = excluded.update_id, payload = excluded.payload, checksum = excluded.checksum, published_at = excluded.published_at RETURNING version"
+    ).bind(body.updateId, payload, checksum, publishedAt).first<{ version: number }>();
+    if (!published) throw new Error("CONFIG_PUBLISH_FAILED");
+    const version = published.version;
     return response({ published: true, version, updateId: body.updateId, checksum, publishedAt, channelCount: body.channels.length });
   }
 
