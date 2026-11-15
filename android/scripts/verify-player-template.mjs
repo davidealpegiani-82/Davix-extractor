@@ -57,6 +57,7 @@ assert.match(template, /maxMaxBufferLength:90/);
 assert.match(template, /fullscreenBtn/);
 assert.match(template, /e\.key==='ArrowDown'\|\|e\.key==='ArrowUp'/, 'HTML Player must support keyboard navigation through visible categories and channels');
 assert.match(template, /e\.key==='ArrowRight'\|\|e\.key==='ArrowLeft'/, 'HTML Player must expand and collapse focused category folders with arrow keys');
+assert.match(template, /dataset\.categoryKey=key/, 'HTML Player must restore focus to the category after it is expanded or collapsed');
 assert.match(template, /e\.key==='f'\|\|e\.key==='F'/, 'HTML Player must provide a fullscreen keyboard shortcut');
 assert.match(template, /e\.key==='k'\|\|e\.key==='K'/, 'HTML Player must provide a play/pause keyboard shortcut');
 assert.match(template, /videoStage\.requestFullscreen/);
