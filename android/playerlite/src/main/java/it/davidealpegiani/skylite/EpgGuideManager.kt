@@ -21,10 +21,13 @@ internal data class EpgRefreshResult(val guides: Map<String, EpgGuide>, val matc
 internal object EpgGuideManager {
     private const val PREFS = "davix_epg_cache"
     private const val LAST_SYNC = "last_sync"
+    private const val LAST_ATTEMPT = "last_attempt"
+    private const val MATCHED_COUNT = "matched_count"
     private const val GUIDE_CACHE = "guide_cache"
     private const val MATCH_CACHE = "match_cache"
     private const val CHANNEL_SIGNATURE = "channel_signature"
     private const val REFRESH_INTERVAL_MS = 6L * 60L * 60L * 1000L
+    private const val NO_MATCH_RETRY_INTERVAL_MS = 30L * 60L * 1000L
     private val sources = listOf(
         "IPTV-EPG Italia" to "https://iptv-epg.org/files/epg-it.xml.gz",
         "Sky Italia" to "https://iptv-org.github.io/epg/guides/it/guidatv.sky.it.xml"
@@ -36,8 +39,16 @@ internal object EpgGuideManager {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val signature = channels.map { normalize(it.tvgId) + "|" + normalize(it.tvgName.ifBlank { it.name }) }
             .sorted().joinToString("\n")
-        return System.currentTimeMillis() - prefs.getLong(LAST_SYNC, 0L) >= REFRESH_INTERVAL_MS ||
-            prefs.getString(CHANNEL_SIGNATURE, null) != signature
+        val now = System.currentTimeMillis()
+        val signatureChanged = prefs.getString(CHANNEL_SIGNATURE, null) != signature
+        val matchedCount = prefs.getInt(MATCHED_COUNT, 0)
+        return signatureChanged || if (matchedCount > 0) {
+            now - prefs.getLong(LAST_SYNC, 0L) >= REFRESH_INTERVAL_MS
+        } else {
+            // Un tentativo senza associazioni NON è un aggiornamento riuscito:
+            // riprova dopo 30 minuti invece di bloccare l'EPG per sei ore.
+            now - prefs.getLong(LAST_ATTEMPT, 0L) >= NO_MATCH_RETRY_INTERVAL_MS
+        }
     }
 
     fun formatTime(value: Long): String = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(value))
@@ -109,8 +120,19 @@ internal object EpgGuideManager {
         }
         val signature = channels.map { normalize(it.tvgId) + "|" + normalize(it.tvgName.ifBlank { it.name }) }
             .sorted().joinToString("\n")
-        prefs.edit().putString(GUIDE_CACHE, cache.toString()).putString(MATCH_CACHE, newMatches.toString())
-            .putString(CHANNEL_SIGNATURE, signature).putLong(LAST_SYNC, now).apply()
+        val editor = prefs.edit()
+            .putString(GUIDE_CACHE, cache.toString())
+            .putString(MATCH_CACHE, newMatches.toString())
+            .putString(CHANNEL_SIGNATURE, signature)
+            .putLong(LAST_ATTEMPT, now)
+            .putInt(MATCHED_COUNT, matched)
+        if (matched > 0) {
+            editor.putLong(LAST_SYNC, now)
+        } else {
+            // Non memorizzare una ricerca vuota come sincronizzazione riuscita.
+            editor.remove(LAST_SYNC)
+        }
+        editor.apply()
         return EpgRefreshResult(result, matched, usedSources.joinToString(" + ").ifBlank { "fonti XMLTV" })
     }
 
