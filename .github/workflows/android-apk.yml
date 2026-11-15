@@ -75,25 +75,46 @@ jobs:
         env:
           DAVIX_BUILD_TYPE: ${{ steps.apk-signing.outputs.build_type }}
         run: gradle --no-daemon ":app:assemble${DAVIX_BUILD_TYPE}" ":playerlite:assemble${DAVIX_BUILD_TYPE}"
-      - name: Rename APKs
+      - name: Collect and rename APKs
         env:
           DAVIX_BUILD_TYPE: ${{ steps.apk-signing.outputs.build_type }}
+        shell: bash
         run: |
+          set -euo pipefail
           variant="$(echo "$DAVIX_BUILD_TYPE" | tr '[:upper:]' '[:lower:]')"
-          cp "android/app/build/outputs/apk/$variant/app-$variant.apk" "android/app/build/outputs/apk/$variant/DAVIX-Extractor.apk"
-          cp "android/playerlite/build/outputs/apk/$variant/playerlite-$variant.apk" "android/playerlite/build/outputs/apk/$variant/DAVIX-Player.apk"
+          extractor_dir="android/app/build/outputs/apk/$variant"
+          player_dir="android/playerlite/build/outputs/apk/$variant"
+
+          extractor_apk="$(find "$extractor_dir" -type f -name '*.apk' -print -quit)"
+          player_apk="$(find "$player_dir" -type f -name '*.apk' -print -quit)"
+
+          if [ -z "$extractor_apk" ]; then
+            echo "::error::No Extractor APK found under $extractor_dir"
+            find android/app/build/outputs -maxdepth 5 -type f -print || true
+            exit 1
+          fi
+          if [ -z "$player_apk" ]; then
+            echo "::error::No Player APK found under $player_dir"
+            find android/playerlite/build/outputs -maxdepth 5 -type f -print || true
+            exit 1
+          fi
+
+          mkdir -p android/dist
+          cp "$extractor_apk" android/dist/DAVIX-Extractor.apk
+          cp "$player_apk" android/dist/DAVIX-Player.apk
+          ls -lh android/dist
       - name: Upload DAVIX Extractor APK
         uses: actions/upload-artifact@v4
         with:
           name: DAVIX-Extractor
-          path: "android/app/build/outputs/apk/${{ steps.apk-signing.outputs.build_type == 'Release' && 'release' || 'debug' }}/DAVIX-Extractor.apk"
+          path: "android/dist/DAVIX-Extractor.apk"
           if-no-files-found: error
           retention-days: 30
       - name: Upload DAVIX Player APK
         uses: actions/upload-artifact@v4
         with:
           name: DAVIX-Player
-          path: "android/playerlite/build/outputs/apk/${{ steps.apk-signing.outputs.build_type == 'Release' && 'release' || 'debug' }}/DAVIX-Player.apk"
+          path: "android/dist/DAVIX-Player.apk"
           if-no-files-found: error
           retention-days: 30
       - name: Publish stable DAVIX Player APK
@@ -105,5 +126,5 @@ jobs:
           prerelease: true
           make_latest: false
           files: |
-            android/app/build/outputs/apk/${{ steps.apk-signing.outputs.build_type == 'Release' && 'release' || 'debug' }}/DAVIX-Extractor.apk
-            android/playerlite/build/outputs/apk/${{ steps.apk-signing.outputs.build_type == 'Release' && 'release' || 'debug' }}/DAVIX-Player.apk
+            android/dist/DAVIX-Extractor.apk
+            android/dist/DAVIX-Player.apk
