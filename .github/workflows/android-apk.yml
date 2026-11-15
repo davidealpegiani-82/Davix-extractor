@@ -41,7 +41,15 @@ jobs:
           DAVIX_SIGNING_KEY_ALIAS: ${{ github.event_name != 'pull_request' && secrets.DAVIX_KEY_ALIAS || '' }}
           DAVIX_SIGNING_KEY_PASSWORD: ${{ github.event_name != 'pull_request' && secrets.DAVIX_KEY_PASSWORD || '' }}
         run: |
-          if [ -n "$DAVIX_KEYSTORE_BASE64" ] || [ -n "$DAVIX_SIGNING_STORE_PASSWORD" ] || [ -n "$DAVIX_SIGNING_KEY_ALIAS" ] || [ -n "$DAVIX_SIGNING_KEY_PASSWORD" ]; then
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            keytool -genkeypair -noprompt -storetype JKS -keystore "$RUNNER_TEMP/davix-ci-test.jks" -storepass "davix-ci-test-store" -keypass "davix-ci-test-key" -alias davix-ci-test -dname "CN=DAVIX CI Test" -keyalg RSA -keysize 2048 -validity 2
+            echo "DAVIX_SIGNING_STORE_FILE=$RUNNER_TEMP/davix-ci-test.jks" >> "$GITHUB_ENV"
+            echo "DAVIX_SIGNING_STORE_PASSWORD=davix-ci-test-store" >> "$GITHUB_ENV"
+            echo "DAVIX_SIGNING_KEY_ALIAS=davix-ci-test" >> "$GITHUB_ENV"
+            echo "DAVIX_SIGNING_KEY_PASSWORD=davix-ci-test-key" >> "$GITHUB_ENV"
+            echo "build_type=Release" >> "$GITHUB_OUTPUT"
+            echo "Using an ephemeral test key to verify signed release builds; no repository secrets are exposed."
+          elif [ -n "$DAVIX_KEYSTORE_BASE64" ] || [ -n "$DAVIX_SIGNING_STORE_PASSWORD" ] || [ -n "$DAVIX_SIGNING_KEY_ALIAS" ] || [ -n "$DAVIX_SIGNING_KEY_PASSWORD" ]; then
             test -n "$DAVIX_KEYSTORE_BASE64" || { echo "Missing DAVIX_KEYSTORE_BASE64"; exit 1; }
             test -n "$DAVIX_SIGNING_STORE_PASSWORD" || { echo "Missing DAVIX_KEYSTORE_PASSWORD"; exit 1; }
             test -n "$DAVIX_SIGNING_KEY_ALIAS" || { echo "Missing DAVIX_KEY_ALIAS"; exit 1; }
