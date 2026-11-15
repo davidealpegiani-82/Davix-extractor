@@ -90,12 +90,18 @@ internal object CloudSyncAdmin {
         }
     }
 
-    fun publish(context: Context, channels: JSONArray, categories: JSONArray = JSONArray()): JSONObject {
+    fun publish(
+        context: Context,
+        channels: JSONArray,
+        categories: JSONArray = JSONArray(),
+        epgSourceUrl: String? = null
+    ): JSONObject {
         val payload = JSONObject()
             .put("schemaVersion", 1)
             .put("updateId", java.util.UUID.randomUUID().toString())
             .put("categories", categories)
             .put("channels", channels)
+        if (!epgSourceUrl.isNullOrBlank()) payload.put("epgSourceUrl", epgSourceUrl.trim())
         return adminRequest(context, "POST", "/v1/admin/config/publish", payload)
     }
 
