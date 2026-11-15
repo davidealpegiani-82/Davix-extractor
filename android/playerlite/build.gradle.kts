@@ -1,3 +1,9 @@
+val davixStoreFile = System.getenv("DAVIX_SIGNING_STORE_FILE")
+val davixStorePassword = System.getenv("DAVIX_SIGNING_STORE_PASSWORD")
+val davixKeyAlias = System.getenv("DAVIX_SIGNING_KEY_ALIAS")
+val davixKeyPassword = System.getenv("DAVIX_SIGNING_KEY_PASSWORD")
+val hasDavixSigning = listOf(davixStoreFile, davixStorePassword, davixKeyAlias, davixKeyPassword).all { !it.isNullOrBlank() }
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -11,8 +17,28 @@ android {
         applicationId = "it.davidealpegiani.skylite"
         minSdk = 24
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 3
+        versionName = "1.1.1"
+    }
+
+    signingConfigs {
+        if (hasDavixSigning) {
+            create("davixRelease") {
+                storeFile = file(davixStoreFile!!)
+                storePassword = davixStorePassword
+                keyAlias = davixKeyAlias
+                keyPassword = davixKeyPassword
+            }
+        }
+    }
+
+    buildTypes {
+        getByName("release") {
+            isMinifyEnabled = false
+            if (hasDavixSigning) {
+                signingConfig = signingConfigs.getByName("davixRelease")
+            }
+        }
     }
 
     compileOptions {
