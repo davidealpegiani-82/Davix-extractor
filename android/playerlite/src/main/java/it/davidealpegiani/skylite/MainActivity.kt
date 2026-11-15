@@ -1086,6 +1086,7 @@ class MainActivity : Activity() {
             endpointInput.visibility = View.GONE
             pairButton.visibility = View.GONE
             cloudStatusView.visibility = View.GONE
+            epgStatusView.visibility = View.GONE
             channelScroll.visibility = View.GONE
             cloudHeaderView.visibility = View.GONE
             channelsHeaderView.visibility = View.GONE
@@ -1123,6 +1124,7 @@ class MainActivity : Activity() {
                 pairButton.visibility = View.GONE
             }
             cloudStatusView.visibility = View.VISIBLE
+            epgStatusView.visibility = View.VISIBLE
             channelScroll.visibility = View.VISIBLE
             cloudHeaderView.visibility = View.GONE
             channelsHeaderView.visibility = if (PlayerCloudSync.hasValidLease(this)) View.VISIBLE else View.GONE
