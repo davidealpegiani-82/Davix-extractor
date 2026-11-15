@@ -3,6 +3,8 @@ package it.davidealpegiani.skylite
 import android.app.Activity
 import android.app.AlertDialog
 import android.graphics.Color
+import android.content.res.Configuration
+import android.os.Build
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -167,6 +169,15 @@ class MainActivity : Activity() {
 
     private fun buildScreen() {
         val tvMode = isTvDevice()
+        val wideLayout = tvMode || (
+            resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE &&
+                resources.configuration.screenWidthDp >= 600
+            )
+        val sidebarWidthDp = if (tvMode) {
+            minOf(390, maxOf(320, resources.configuration.screenWidthDp / 3))
+        } else {
+            minOf(300, maxOf(240, (resources.configuration.screenWidthDp * 0.38f).toInt()))
+        }
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.TL_BR, intArrayOf(Color.rgb(5, 10, 22), Color.rgb(12, 20, 38), Color.rgb(5, 9, 18)))
@@ -222,23 +233,27 @@ class MainActivity : Activity() {
             topBar.addView(livePill, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(46)))
             root.addView(topBar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(82)))
         }
-        val tvContent = if (tvMode) LinearLayout(this).apply {
+        val tvContent = if (wideLayout) LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             background = android.graphics.drawable.GradientDrawable(
                 android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
                 intArrayOf(Color.rgb(5, 10, 22), Color.rgb(9, 18, 34))
             )
         } else root
-        if (tvMode) root.addView(tvContent, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-        val controls = if (tvMode) LinearLayout(this).apply {
+        if (wideLayout) root.addView(tvContent, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        val controls = if (wideLayout) LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(26), dp(24), dp(26), dp(24))
             background = android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(Color.rgb(17, 29, 52), Color.rgb(9, 17, 32))).apply { setStroke(dp(1), Color.rgb(38, 65, 98)) }
             descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
         } else root
         controlsPanel = controls
-        if (tvMode) {
-            tvContent.addView(controls, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        if (wideLayout) {
+            // Sidebar stabile: non deve occupare tutta la riga e spingere il video fuori schermo.
+            tvContent.addView(
+                controls,
+                LinearLayout.LayoutParams(dp(sidebarWidthDp), ViewGroup.LayoutParams.MATCH_PARENT)
+            )
         }
         titleView = TextView(this).apply {
             text = android.text.SpannableString("DAVIX  PLAYER").apply {
@@ -378,7 +393,7 @@ class MainActivity : Activity() {
         channelsHeaderView.visibility = if (PlayerCloudSync.hasValidLease(this)) View.VISIBLE else View.GONE
 
         playerContainer = FrameLayout(this).apply {
-            layoutParams = if (tvMode) {
+            layoutParams = if (wideLayout) {
                 LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
             } else {
                 LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
@@ -425,8 +440,9 @@ class MainActivity : Activity() {
             ).apply { setMargins(dp(16), dp(16), 0, 0) }
         }
         playerContainer.addView(fullscreenChannelsButton)
-        // In navigazione il video resta nascosto: la schermata iniziale è l’elenco categorie.
-        playerContainer.visibility = View.GONE
+        // Nei layout larghi il video resta già visibile accanto alla libreria,
+        // come nell'interfaccia desktop HTML. In verticale conserva il flusso mobile.
+        playerContainer.visibility = if (wideLayout) View.VISIBLE else View.GONE
 
         fullscreenChannelDrawer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -465,7 +481,7 @@ class MainActivity : Activity() {
         fullscreenChannelDrawer.addView(drawerScroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         playerContainer.addView(fullscreenChannelDrawer)
         renderFullscreenChannelList()
-        if (tvMode) tvContent.addView(playerContainer) else root.addView(playerContainer)
+        if (wideLayout) tvContent.addView(playerContainer) else root.addView(playerContainer)
         channelScroll = ScrollView(this).apply {
             isFillViewport = true
             isFocusable = false
@@ -481,7 +497,7 @@ class MainActivity : Activity() {
             setPadding(dp(12), dp(8), dp(12), dp(12))
         }
         channelScroll.addView(channelsList)
-        if (tvMode) controls.addView(channelScroll) else root.addView(channelScroll)
+        if (wideLayout) controls.addView(channelScroll) else root.addView(channelScroll)
         setContentView(root)
         if (PlayerCloudSync.hasValidLease(this)) {
             endpointInput.visibility = View.GONE
@@ -494,9 +510,22 @@ class MainActivity : Activity() {
         if (tvMode && cloudChannels.isEmpty() && !PlayerCloudSync.hasValidLease(this)) activationCodeInput.post { activationCodeInput.requestFocus() }
     }
 
-    private fun isTvDevice(): Boolean =
-        packageManager.hasSystemFeature("android.software.leanback") ||
-            packageManager.hasSystemFeature("android.hardware.type.television")
+    private fun isTvDevice(): Boolean {
+        val features = packageManager
+        val televisionUiMode =
+            (resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK) ==
+                Configuration.UI_MODE_TYPE_TELEVISION
+        val leanback = features.hasSystemFeature("android.software.leanback")
+        val televisionHardware = features.hasSystemFeature("android.hardware.type.television")
+        val fireTv = features.hasSystemFeature("amazon.hardware.fire_tv") ||
+            (Build.MANUFACTURER.equals("Amazon", ignoreCase = true) &&
+                (Build.MODEL.contains("AFT", ignoreCase = true) ||
+                    Build.MODEL.contains("Fire TV", ignoreCase = true)))
+        val largeNonTouchDisplay =
+            !features.hasSystemFeature("android.hardware.touchscreen") &&
+                resources.configuration.screenWidthDp >= 720
+        return televisionUiMode || leanback || televisionHardware || fireTv || largeNonTouchDisplay
+    }
 
     private fun loadCachedChannels() {
         cloudChannels.clear()

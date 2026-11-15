@@ -91,6 +91,14 @@ assert.match(lite, /setMaxPlaybackSpeed\(1\.04f\)/);
 assert.match(lite, /DefaultLoadErrorHandlingPolicy\(8\)/);
 assert.match(lite, /private fun monitorPlaybackHealth\(/, 'Player Lite must detect stalled playback even without a Media3 error');
 assert.match(lite, /private fun isCurrentAnalyticsEvent\(/, 'Player Lite must reject analytics callbacks from an obsolete channel timeline');
+assert.match(lite, /val wideLayout = tvMode \|\|/, 'Player Lite must use a split layout on TV and landscape phones');
+assert.match(lite, /LinearLayout\.LayoutParams\(dp\(sidebarWidthDp\), ViewGroup\.LayoutParams\.MATCH_PARENT\)/, 'TV sidebar must have a bounded width so the video remains visible');
+assert.match(lite, /playerContainer\.visibility = if \(wideLayout\) View\.VISIBLE else View\.GONE/, 'Wide layouts must show the video beside the channel library before playback');
+assert.match(lite, /Configuration\.UI_MODE_TYPE_TELEVISION/, 'TV detection must include Android television UI mode');
+assert.match(lite, /amazon\.hardware\.fire_tv/, 'TV detection must explicitly support Fire TV devices');
+assert.match(template, /@media\(max-width:900px\) and \(orientation:landscape\)/, 'HTML Player must use a side-by-side layout on landscape phones');
+assert.match(template, /layoutLabel\.textContent=portrait\?/, 'HTML Player must identify its active responsive layout');
+
 assert.match(lite, /eventTime\.timeline == current\.currentTimeline/, 'HLS analytics must belong to the active Media3 timeline');
 assert.match(lite, /private fun schedulePlaybackRecovery\(/, 'Player Lite must have a persistent automatic recovery path');
 assert.match(lite, /longArrayOf\(2_000L, 4_000L, 8_000L, 15_000L, 30_000L, 45_000L, 60_000L\)/, 'recovery retries must use capped backoff without a fixed attempt limit');
