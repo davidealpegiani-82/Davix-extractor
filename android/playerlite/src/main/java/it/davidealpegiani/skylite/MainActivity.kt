@@ -112,6 +112,7 @@ class MainActivity : Activity() {
     private lateinit var activationCodeInput: EditText
     private lateinit var pairButton: Button
     private lateinit var cloudStatusView: TextView
+    private lateinit var epgStatusView: TextView
     private lateinit var channelsList: LinearLayout
     private lateinit var channelScroll: ScrollView
     private lateinit var playerContainer: FrameLayout
@@ -344,6 +345,14 @@ class MainActivity : Activity() {
             setPadding(16, 4, 16, 10)
         }
         controls.addView(cloudStatusView)
+        epgStatusView = TextView(this).apply {
+            text = "EPG: in attesa di caricamento"
+            setTextColor(Color.rgb(126, 190, 218))
+            textSize = 11f
+            setPadding(dp(16), dp(2), dp(16), dp(8))
+            contentDescription = "Stato guida programmi EPG"
+        }
+        controls.addView(epgStatusView)
 
         channelsHeaderView = TextView(this).apply {
             text = "I TUOI CANALI"
@@ -916,12 +925,24 @@ class MainActivity : Activity() {
         if (cloudChannels.isEmpty() || epgRefreshInProgress) return
         epgGuides.clear()
         epgGuides.putAll(EpgGuideManager.readCached(this))
+        val cachedNowCount = epgGuides.values.count { it.nowTitle.isNotBlank() }
+        if (cachedNowCount > 0) {
+            epgStatusView.text = "EPG disponibile · programmi in onda su $cachedNowCount canali"
+            renderCloudChannels()
+        } else {
+            epgStatusView.text = "EPG: nessun programma in cache · controllo delle fonti…"
+        }
         val snapshot = cloudChannels.map { EpgChannelInput(it.name, it.url, it.tvgId, it.tvgName) }
         if (!force && !EpgGuideManager.shouldRefresh(this, snapshot)) {
-            if (epgGuides.isNotEmpty()) renderCloudChannels()
+            epgStatusView.text = if (epgGuides.isNotEmpty()) {
+                "EPG aggiornato · $cachedNowCount programmi in onda disponibili"
+            } else {
+                "EPG non disponibile per questa lista · prossimo controllo automatico tra qualche ora"
+            }
             return
         }
         epgRefreshInProgress = true
+        epgStatusView.text = "EPG: recupero palinsesti e associazione automatica dei canali…"
         cloudExecutor.execute {
             val result = runCatching { EpgGuideManager.refresh(this@MainActivity, snapshot) }
             runOnUiThread {
@@ -931,10 +952,15 @@ class MainActivity : Activity() {
                     epgGuides.clear()
                     epgGuides.putAll(refreshed.guides)
                     renderCloudChannels()
-                    cloudStatusView.text = "EPG aggiornato · " + refreshed.matchedCount + "/" + snapshot.size + " canali associati · " + refreshed.sourceLabel
+                    val nowCount = refreshed.guides.values.count { it.nowTitle.isNotBlank() }
+                    epgStatusView.text = if (refreshed.matchedCount > 0) {
+                        "EPG aggiornato · ${refreshed.matchedCount}/${snapshot.size} canali associati · $nowCount programmi in onda · ${refreshed.sourceLabel}"
+                    } else {
+                        "EPG caricato, ma nessun canale della lista è stato associato · ${refreshed.sourceLabel}"
+                    }
                 }.onFailure { error ->
                     if (epgGuides.isNotEmpty()) renderCloudChannels()
-                    cloudStatusView.text = "EPG non aggiornato: " + (error.message ?: "fonte non raggiungibile") + ". Mantengo la guida salvata."
+                    epgStatusView.text = "EPG non aggiornato: " + (error.message ?: "fonte non raggiungibile") + ". Riproverò al prossimo aggiornamento."
                 }
             }
         }
