@@ -129,6 +129,7 @@ class MainActivity : Activity() {
     private lateinit var epgStatusView: TextView
     private lateinit var channelsList: LinearLayout
     private lateinit var channelScroll: ScrollView
+    private lateinit var channelBrowser: LinearLayout
     private lateinit var playerContainer: FrameLayout
     private lateinit var controlsPanel: LinearLayout
     private lateinit var topBar: LinearLayout
@@ -174,11 +175,7 @@ class MainActivity : Activity() {
             resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE &&
                 resources.configuration.screenWidthDp >= 600
             )
-        val sidebarWidthDp = if (tvMode) {
-            minOf(390, maxOf(320, resources.configuration.screenWidthDp / 3))
-        } else {
-            minOf(300, maxOf(240, (resources.configuration.screenWidthDp * 0.38f).toInt()))
-        }
+        val sidebarWidthDp = if (tvMode) 184 else minOf(300, maxOf(240, (resources.configuration.screenWidthDp * 0.38f).toInt()))
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.TL_BR, intArrayOf(Color.rgb(5, 10, 22), Color.rgb(12, 20, 38), Color.rgb(5, 9, 18)))
@@ -244,17 +241,13 @@ class MainActivity : Activity() {
         if (wideLayout) root.addView(tvContent, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         val controls = if (wideLayout) LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(26), dp(24), dp(26), dp(24))
+            setPadding(dp(if (tvMode) 12 else 26), dp(if (tvMode) 12 else 24), dp(if (tvMode) 12 else 26), dp(if (tvMode) 12 else 24))
             background = android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(Color.rgb(17, 29, 52), Color.rgb(9, 17, 32))).apply { setStroke(dp(1), Color.rgb(38, 65, 98)) }
             descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
         } else root
         controlsPanel = controls
-        if (wideLayout) {
-            // Sidebar stabile: non deve occupare tutta la riga e spingere il video fuori schermo.
-            tvContent.addView(
-                controls,
-                LinearLayout.LayoutParams(dp(sidebarWidthDp), ViewGroup.LayoutParams.MATCH_PARENT)
-            )
+        if (wideLayout && !tvMode) {
+            tvContent.addView(controls, LinearLayout.LayoutParams(dp(sidebarWidthDp), ViewGroup.LayoutParams.MATCH_PARENT))
         }
         titleView = TextView(this).apply {
             text = android.text.SpannableString("DAVIX  PLAYER").apply {
@@ -262,18 +255,18 @@ class MainActivity : Activity() {
                 setSpan(android.text.style.RelativeSizeSpan(1.08f), 0, 3, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             }
             setTextColor(Color.WHITE)
-            textSize = if (tvMode) 31f else 21f
+            textSize = if (tvMode) 19f else 21f
             setTypeface(null, android.graphics.Typeface.BOLD)
             letterSpacing = 0.10f
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(12), dp(26), dp(12), dp(10))
+            setPadding(dp(8), dp(if (tvMode) 8 else 26), dp(8), dp(6))
         }
         statusView = TextView(this).apply {
             text = if (tvMode) "LIVE TELEVISION  •  BIG SCREEN EXPERIENCE" else "Apri un canale dal DAVIX Player."
             setTextColor(Color.rgb(135, 177, 205))
             textSize = if (tvMode) 11f else 13f
             letterSpacing = if (tvMode) 0.16f else 0f
-            setPadding(dp(12), 0, dp(12), dp(22))
+            setPadding(dp(8), 0, dp(8), dp(if (tvMode) 8 else 22))
         }
         playerView = PlayerView(this).apply {
             isFocusable = tvMode
@@ -307,20 +300,20 @@ class MainActivity : Activity() {
         diagnosticsView = TextView(this).apply {
             text = "HLS: in attesa · buffer 0s"
             setTextColor(Color.rgb(112, 196, 220))
-            textSize = if (tvMode) 13f else 11f
-            setPadding(dp(14), dp(12), dp(14), dp(12))
-            background = android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(Color.rgb(15, 46, 65), Color.rgb(18, 32, 54))).apply { cornerRadius = dp(14).toFloat(); setStroke(dp(1), Color.rgb(36, 111, 145)) }
+            textSize = if (tvMode) 10f else 11f
+            setPadding(dp(8), dp(7), dp(8), dp(7))
+            background = android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(Color.rgb(15, 46, 65), Color.rgb(18, 32, 54))).apply { cornerRadius = dp(8).toFloat(); setStroke(dp(1), Color.rgb(36, 111, 145)) }
         }
         controls.addView(diagnosticsView)
         diagnosticsView.visibility = if (PlayerCloudSync.hasValidLease(this)) View.VISIBLE else View.GONE
 
         updatesButton = TextView(this).apply {
             text = "⬇  AGGIORNAMENTI DAVIX"
-            textSize = 13f
+            textSize = if (tvMode) 10f else 13f
             gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
             setTypeface(null, android.graphics.Typeface.BOLD)
-            setPadding(dp(16), dp(13), dp(16), dp(13))
+            setPadding(dp(8), dp(8), dp(8), dp(8))
             isClickable = true
             isFocusable = true
             setBackground(channelActionBackground())
@@ -395,15 +388,15 @@ class MainActivity : Activity() {
         cloudStatusView = TextView(this).apply {
             text = "Accesso bloccato: inserisci un codice monouso generato da Admin"
             setTextColor(Color.rgb(164, 202, 220))
-            textSize = 12f
-            setPadding(16, 4, 16, 10)
+            textSize = if (tvMode) 10f else 12f
+            setPadding(dp(8), dp(4), dp(8), dp(6))
         }
         controls.addView(cloudStatusView)
         epgStatusView = TextView(this).apply {
             text = "EPG: in attesa di caricamento"
             setTextColor(Color.rgb(126, 190, 218))
-            textSize = 11f
-            setPadding(dp(16), dp(2), dp(16), dp(8))
+            textSize = if (tvMode) 9f else 11f
+            setPadding(dp(8), dp(2), dp(8), dp(5))
             contentDescription = "Stato guida programmi EPG"
         }
         controls.addView(epgStatusView)
@@ -411,13 +404,12 @@ class MainActivity : Activity() {
         channelsHeaderView = TextView(this).apply {
             text = "I TUOI CANALI"
             setTextColor(Color.rgb(255, 204, 64))
-            textSize = if (tvMode) 16f else 13f
+            textSize = if (tvMode) 18f else 13f
             setTypeface(null, android.graphics.Typeface.BOLD)
             letterSpacing = 0.08f
-            setPadding(dp(12), dp(26), dp(12), dp(14))
+            setPadding(dp(16), dp(10), dp(12), dp(10))
             contentDescription = "Elenco canali. Usa le frecce per scegliere e OK per riprodurre."
         }
-        controls.addView(channelsHeaderView)
         channelsHeaderView.visibility = if (PlayerCloudSync.hasValidLease(this)) View.VISIBLE else View.GONE
 
         playerContainer = FrameLayout(this).apply {
@@ -468,9 +460,9 @@ class MainActivity : Activity() {
             ).apply { setMargins(dp(16), dp(16), 0, 0) }
         }
         playerContainer.addView(fullscreenChannelsButton)
-        // Nei layout larghi il video resta già visibile accanto alla libreria,
-        // come nell'interfaccia desktop HTML. In verticale conserva il flusso mobile.
-        playerContainer.visibility = if (wideLayout) View.VISIBLE else View.GONE
+        // Su TV l'anteprima resta collassata finché non viene scelto un canale.
+        // In questo modo il catalogo recupera subito tutto lo spazio disponibile.
+        playerContainer.visibility = if (wideLayout && !tvMode) View.VISIBLE else View.GONE
 
         fullscreenChannelDrawer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -509,7 +501,6 @@ class MainActivity : Activity() {
         fullscreenChannelDrawer.addView(drawerScroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         playerContainer.addView(fullscreenChannelDrawer)
         renderFullscreenChannelList()
-        if (wideLayout) tvContent.addView(playerContainer) else root.addView(playerContainer)
         channelScroll = ScrollView(this).apply {
             isFillViewport = true
             isFocusable = false
@@ -525,7 +516,27 @@ class MainActivity : Activity() {
             setPadding(dp(12), dp(8), dp(12), dp(12))
         }
         channelScroll.addView(channelsList)
-        if (wideLayout) controls.addView(channelScroll) else root.addView(channelScroll)
+        if (wideLayout) {
+            channelBrowser = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                background = android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(Color.rgb(8, 17, 32), Color.rgb(5, 11, 22)))
+                setPadding(dp(if (tvMode) 10 else 12), 0, dp(if (tvMode) 10 else 12), dp(8))
+            }
+            channelBrowser.addView(channelsHeaderView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            channelBrowser.addView(channelScroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+            if (tvMode) {
+                tvContent.addView(controls, LinearLayout.LayoutParams(dp(sidebarWidthDp), ViewGroup.LayoutParams.MATCH_PARENT))
+                tvContent.addView(channelBrowser, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.5f))
+                tvContent.addView(playerContainer, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.05f))
+            } else {
+                controls.addView(channelBrowser, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+                tvContent.addView(playerContainer)
+            }
+        } else {
+            root.addView(channelsHeaderView)
+            root.addView(channelScroll)
+            root.addView(playerContainer)
+        }
         setContentView(root)
         if (PlayerCloudSync.hasValidLease(this)) {
             endpointInput.visibility = View.GONE
@@ -1168,6 +1179,7 @@ class MainActivity : Activity() {
             epgStatusView.visibility = View.GONE
             updatesButton.visibility = View.GONE
             channelScroll.visibility = View.GONE
+            if (::channelBrowser.isInitialized) channelBrowser.visibility = View.GONE
             cloudHeaderView.visibility = View.GONE
             channelsHeaderView.visibility = View.GONE
             if (isTvDevice()) playerParams.width = ViewGroup.LayoutParams.MATCH_PARENT
@@ -1207,13 +1219,19 @@ class MainActivity : Activity() {
             epgStatusView.visibility = View.VISIBLE
             updatesButton.visibility = View.VISIBLE
             channelScroll.visibility = View.VISIBLE
+            if (::channelBrowser.isInitialized) channelBrowser.visibility = View.VISIBLE
             cloudHeaderView.visibility = View.GONE
             channelsHeaderView.visibility = if (PlayerCloudSync.hasValidLease(this)) View.VISIBLE else View.GONE
             player?.pause()
-            playerContainer.visibility = View.GONE
-            if (isTvDevice()) playerParams.width = ViewGroup.LayoutParams.MATCH_PARENT
-            playerParams.height = if (isTvDevice()) ViewGroup.LayoutParams.MATCH_PARENT else 0
-            playerParams.weight = if (isTvDevice()) 0f else 1f
+            playerContainer.visibility = if (isTvDevice() && selectedChannelForRecovery != null) View.VISIBLE else View.GONE
+            if (isTvDevice()) {
+                playerParams.width = 0
+                playerParams.height = ViewGroup.LayoutParams.MATCH_PARENT
+                playerParams.weight = 1.05f
+            } else {
+                playerParams.height = 0
+                playerParams.weight = 1f
+            }
             playerContainer.layoutParams = playerParams
             fullscreenButton.text = "⛶"
             fullscreenButton.contentDescription = "Attiva schermo intero"
