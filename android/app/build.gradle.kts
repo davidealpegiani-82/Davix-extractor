@@ -1,13 +1,14 @@
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+}
+
 val davixStoreFile = System.getenv("DAVIX_SIGNING_STORE_FILE")
 val davixStorePassword = System.getenv("DAVIX_SIGNING_STORE_PASSWORD")
 val davixKeyAlias = System.getenv("DAVIX_SIGNING_KEY_ALIAS")
 val davixKeyPassword = System.getenv("DAVIX_SIGNING_KEY_PASSWORD")
 val hasDavixSigning = listOf(davixStoreFile, davixStorePassword, davixKeyAlias, davixKeyPassword).all { !it.isNullOrBlank() }
 
-plugins {
-    id("com.android.application")
-    id("org.jetbrains.kotlin.android")
-}
 
 android {
     namespace = "it.davidealpegiani.skyunoextractor"
@@ -25,9 +26,9 @@ android {
         if (hasDavixSigning) {
             create("davixRelease") {
                 storeFile = file(davixStoreFile!!)
-                storePassword = davixStorePassword
-                keyAlias = davixKeyAlias
-                keyPassword = davixKeyPassword
+                storePassword = davixStorePassword!!
+                keyAlias = davixKeyAlias!!
+                keyPassword = davixKeyPassword!!
             }
         }
     }
