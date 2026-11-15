@@ -93,7 +93,11 @@ assert.match(lite, /private fun monitorPlaybackHealth\(/, 'Player Lite must dete
 assert.match(lite, /private fun isCurrentAnalyticsEvent\(/, 'Player Lite must reject analytics callbacks from an obsolete channel timeline');
 assert.match(lite, /val wideLayout = tvMode \|\|/, 'Player Lite must use a split layout on TV and landscape phones');
 assert.match(lite, /LinearLayout\.LayoutParams\(dp\(sidebarWidthDp\), ViewGroup\.LayoutParams\.MATCH_PARENT\)/, 'TV sidebar must have a bounded width so the video remains visible');
-assert.match(lite, /playerContainer\.visibility = if \(wideLayout\) View\.VISIBLE else View\.GONE/, 'Wide layouts must show the video beside the channel library before playback');
+assert.match(lite, /playerContainer\.visibility = if \(wideLayout && !tvMode\) View\.VISIBLE else View\.GONE/, 'TV preview must start collapsed while non-TV wide layouts retain their preview');
+assert.match(lite, /tvContent\.addView\(channelBrowser, LinearLayout\.LayoutParams\(0, ViewGroup\.LayoutParams\.MATCH_PARENT, 1\.5f\)\)/, 'TV layout must give the channel browser the primary width');
+assert.match(lite, /tvContent\.addView\(playerContainer, LinearLayout\.LayoutParams\(0, ViewGroup\.LayoutParams\.MATCH_PARENT, 1\.05f\)\)/, 'TV preview must stay within its bounded right-hand column');
+assert.match(lite, /channelBrowser\.addView\(channelsHeaderView/, 'Channel heading must sit above the independently scrollable channel list');
+assert.match(lite, /playerContainer\.visibility = View\.VISIBLE/, 'Selecting a channel must expand the collapsed TV preview');
 assert.match(lite, /Configuration\.UI_MODE_TYPE_TELEVISION/, 'TV detection must include Android television UI mode');
 assert.match(lite, /amazon\.hardware\.fire_tv/, 'TV detection must explicitly support Fire TV devices');
 assert.match(template, /@media\(max-width:900px\) and \(orientation:landscape\)/, 'HTML Player must use a side-by-side layout on landscape phones');
