@@ -161,7 +161,7 @@ assert.match(lite, /addGroupedChannelSections\(/, 'Player Lite must render categ
 assert.match(lite, /toggleFavorite\(/, 'Player Lite must expose local favorite selection');
 assert.match(lite, /favorite_urls/, 'Player Lite favorites must persist locally');
 assert.doesNotMatch(lite, /showCategoryManager|showCategoryPicker/, 'Player Lite must not edit Extractor-defined categories');
-assert.match(readFileSync('cloud-sync/src/index.ts', 'utf8'), /categories,[\\s\\S]*?channels: body\\.channels/, 'Cloud Sync must persist category metadata with channels');
+assert.match(readFileSync('cloud-sync/src/index.ts', 'utf8'), /categories,[\s\S]*?channels: body\.channels/, 'Cloud Sync must persist category metadata with channels');
 console.log('Player template checks passed.');
 
 const extractor = readFileSync('android/app/src/main/java/it/davidealpegiani/skyunoextractor/MainActivity.kt', 'utf8');
