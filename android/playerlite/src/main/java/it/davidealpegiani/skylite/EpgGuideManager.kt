@@ -12,6 +12,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import java.util.concurrent.Callable
+import java.util.concurrent.Executors
 import java.util.zip.GZIPInputStream
 
 internal data class EpgChannelInput(val name: String, val url: String, val tvgId: String = "", val tvgName: String = "")
@@ -28,10 +30,17 @@ internal object EpgGuideManager {
     private const val CHANNEL_SIGNATURE = "channel_signature"
     private const val REFRESH_INTERVAL_MS = 6L * 60L * 60L * 1000L
     private const val NO_MATCH_RETRY_INTERVAL_MS = 30L * 60L * 1000L
+
+    // Fonti indipendenti: la guida Sky ha priorità sui canali Sky; le altre
+    // fonti completano i canali e gli orari mancanti. I download partono insieme.
     private val sources = listOf(
+        "Sky Italia" to "https://iptv-org.github.io/epg/guides/it/guidatv.sky.it.xml",
         "IPTV-EPG Italia" to "https://iptv-epg.org/files/epg-it.xml.gz",
-        "Sky Italia" to "https://iptv-org.github.io/epg/guides/it/guidatv.sky.it.xml"
+        "EPG Share Italia" to "https://epgshare01.online/epgshare01/epg_ripper_IT1.xml.gz",
+        "Open EPG Italia 3" to "https://www.open-epg.com/files/italy3.xml.gz",
+        "Open EPG Italia 8" to "https://www.open-epg.com/files/italy8.xml.gz"
     )
+
     private data class Program(val start: Long, val stop: Long, val title: String)
     private data class Dataset(val channelNames: Map<String, List<String>>, val programs: Map<String, List<Program>>)
 
@@ -45,8 +54,6 @@ internal object EpgGuideManager {
         return signatureChanged || if (matchedCount > 0) {
             now - prefs.getLong(LAST_SYNC, 0L) >= REFRESH_INTERVAL_MS
         } else {
-            // Un tentativo senza associazioni NON è un aggiornamento riuscito:
-            // riprova dopo 30 minuti invece di bloccare l'EPG per sei ore.
             now - prefs.getLong(LAST_ATTEMPT, 0L) >= NO_MATCH_RETRY_INTERVAL_MS
         }
     }
@@ -70,14 +77,22 @@ internal object EpgGuideManager {
 
     fun refresh(context: Context, channels: List<EpgChannelInput>): EpgRefreshResult {
         require(channels.isNotEmpty()) { "Nessun canale da associare." }
+
+        // Avvia tutte le fonti in parallelo, con massimo 3 download/parse simultanei
+        // per non saturare memoria e connessione sui dispositivi Android TV meno potenti.
+        val executor = Executors.newFixedThreadPool(minOf(3, sources.size))
+        val futures = sources.map { (label, address) ->
+            executor.submit(Callable { label to download(address) })
+        }
         val datasets = mutableListOf<Pair<String, Dataset>>()
-        for ((label, address) in sources) {
-            try {
-                val data = download(address)
-                if (data.channelNames.isNotEmpty()) datasets.add(label to data)
-            } catch (_: Exception) {
-                // Una fonte indisponibile non blocca il tentativo con la successiva.
+        try {
+            futures.forEach { future ->
+                runCatching { future.get() }.onSuccess { (label, dataset) ->
+                    if (dataset.channelNames.isNotEmpty()) datasets.add(label to dataset)
+                }
             }
+        } finally {
+            executor.shutdownNow()
         }
         if (datasets.isEmpty()) throw IllegalStateException("Nessuna fonte XMLTV raggiungibile.")
 
@@ -91,26 +106,33 @@ internal object EpgGuideManager {
 
         for (channel in channels) {
             val baseKey = normalize(channel.tvgId) + "|" + normalize(channel.tvgName.ifBlank { channel.name })
-            var selected: Pair<String, String>? = null
-            for ((label, dataset) in datasets) {
+            val channelCandidates = datasets.mapNotNull { (label, dataset) ->
                 val cachedId = oldMatches.optString(baseKey + "|" + label).takeIf { it.isNotBlank() }
-                val id = findMatch(channel, dataset, cachedId)
-                if (id != null) {
-                    selected = label to id
-                    // Se la fonte contiene solo l'anagrafica ma nessun programma utile,
-                    // continua con la successiva prima di scegliere questa associazione.
-                    val hasProgram = dataset.programs[id].orEmpty().any { it.stop > now }
-                    if (hasProgram) break
-                }
+                val id = findMatch(channel, dataset, cachedId) ?: return@mapNotNull null
+                val programmes = dataset.programs[id].orEmpty().filter { it.stop > now }
+                newMatches.put(baseKey + "|" + label, id)
+                Triple(label, id, programmes)
             }
-            if (selected == null) continue
-            val (source, id) = selected
-            newMatches.put(baseKey + "|" + source, id)
-            usedSources.add(source)
-            val programmes = datasets.firstOrNull { it.first == source }?.second?.programs?.get(id).orEmpty().sortedBy { it.start }
-            val current = programmes.firstOrNull { it.start <= now && it.stop > now }
-            val next = programmes.firstOrNull { it.start > now }
-            result[channel.url] = EpgGuide(current?.title.orEmpty(), next?.title.orEmpty(), current?.start ?: 0L, current?.stop ?: 0L, id)
+            if (channelCandidates.isEmpty()) continue
+
+            // Unisce i palinsesti: Sky Italia resta prioritaria, le altre fonti
+            // riempiono i buchi. A parità di fascia oraria vince la prima fonte.
+            val mergedPrograms = channelCandidates.flatMap { it.third }
+                .sortedWith(compareBy<Program> { it.start }.thenBy { it.stop })
+                .distinctBy { it.start to it.stop }
+            val current = mergedPrograms.firstOrNull { it.start <= now && it.stop > now }
+            val next = mergedPrograms.firstOrNull { it.start > now }
+
+            channelCandidates.forEach { (label, _, _) -> usedSources.add(label) }
+            val preferredId = channelCandidates.firstOrNull { it.first == "Sky Italia" }?.second
+                ?: channelCandidates.first().second
+            result[channel.url] = EpgGuide(
+                current?.title.orEmpty(),
+                next?.title.orEmpty(),
+                current?.start ?: 0L,
+                current?.stop ?: 0L,
+                preferredId
+            )
             matched++
         }
 
@@ -129,7 +151,6 @@ internal object EpgGuideManager {
         if (matched > 0) {
             editor.putLong(LAST_SYNC, now)
         } else {
-            // Non memorizzare una ricerca vuota come sincronizzazione riuscita.
             editor.remove(LAST_SYNC)
         }
         editor.apply()
@@ -154,7 +175,7 @@ internal object EpgGuideManager {
     }
 
     private fun normalize(value: String): String = value.lowercase(Locale.ROOT)
-        .replace(Regex("\\b(hd|fhd|uhd|4k|hevc|1080p|720p|sd)\\b"), " ")
+        .replace(Regex("\\b(full|hd|fhd|uhd|4k|hevc|h\\.?265|h\\.?264|1080p|720p|sd)\\b"), " ")
         .replace(Regex("[^\\p{L}\\p{N}+]+"), " ").trim().replace(Regex("\\s+"), " ")
 
     private fun similarity(a: String, b: String): Double {
