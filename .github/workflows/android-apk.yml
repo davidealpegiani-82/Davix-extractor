@@ -166,3 +166,4 @@ jobs:
           files: |
             android/dist/DAVIX-Extractor.apk
             android/dist/DAVIX-Player.apk
+            android/dist/version.json
