@@ -98,7 +98,7 @@ async function readJson(request: Request, maxBytes = 1_000_000): Promise<any> {
     offset += chunk.byteLength;
   }
   try {
-    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(payload));
+    return JSON.parse(new TextDecoder().decode(payload));
   } catch {
     throw new Error("INVALID_JSON");
   }
