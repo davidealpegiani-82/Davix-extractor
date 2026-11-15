@@ -36,6 +36,7 @@ import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultLivePlaybackSpeedControl
 import androidx.media3.exoplayer.analytics.AnalyticsListener
@@ -255,11 +256,19 @@ class MainActivity : FragmentActivity() {
                         " bufferedMs=" + player.totalBufferedDuration +
                         " liveOffsetMs=" + player.currentLiveOffset
                 )
-                val retryable = error.errorCodeName.contains("IO_") ||
-                    error.errorCodeName.contains("BEHIND_LIVE_WINDOW")
-                if (retryable && playbackRetryCount < 5) {
-                    val delays = longArrayOf(2_000L, 4_000L, 8_000L, 12_000L, 15_000L)
-                    val delay = delays[playbackRetryCount++]
+                val httpStatus = generateSequence(error as Throwable?) { it.cause }
+                    .mapNotNull { (it as? HttpDataSource.InvalidResponseCodeException)?.responseCode }
+                    .firstOrNull()
+                val retryable = if (httpStatus != null) {
+                    httpStatus == 408 || httpStatus == 425 || httpStatus == 429 || httpStatus in 500..599
+                } else {
+                    error.errorCodeName.contains("IO_") ||
+                        error.errorCodeName.contains("BEHIND_LIVE_WINDOW")
+                }
+                if (retryable) {
+                    val delays = longArrayOf(2_000L, 4_000L, 8_000L, 12_000L, 15_000L, 30_000L)
+                    val delay = delays[playbackRetryCount.coerceAtMost(delays.lastIndex)]
+                    playbackRetryCount = (playbackRetryCount + 1).coerceAtMost(10_000)
                     val failedGeneration = playbackGeneration
                     status.text = "Connessione instabile. Nuovo tentativo tra " + (delay / 1000) + " s…"
                     playbackRetryTask?.let { retryHandler.removeCallbacks(it) }
@@ -280,8 +289,20 @@ class MainActivity : FragmentActivity() {
                     playbackRetryTask = task
                     retryHandler.postDelayed(task, delay)
                 } else {
-                    status.text = "Errore ${error.errorCodeName} (${error.errorCode}): " +
-                        detail.ifBlank { "flusso interrotto o non compatibile" }
+                    status.text = if (httpStatus != null) {
+                        "HTTP $httpStatus: " + when (httpStatus) {
+                            401 -> "autenticazione richiesta"
+                            403 -> "accesso negato dal server"
+                            404 -> "flusso o segmento non trovato"
+                            410 -> "flusso non più disponibile"
+                            429 -> "troppe richieste"
+                            in 500..599 -> "server temporaneamente in errore"
+                            else -> "risposta non valida"
+                        } + ". Verifica la sorgente o seleziona un altro flusso."
+                    } else {
+                        "Errore ${error.errorCodeName} (${error.errorCode}): " +
+                            detail.ifBlank { "flusso interrotto o non compatibile" }
+                    }
                 }
             }
             override fun onPlaybackStateChanged(playbackState: Int) {
