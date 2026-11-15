@@ -16,6 +16,7 @@ const androidWorkflow = readFileSync('.github/workflows/android-apk.yml', 'utf8'
 assert.match(appGradle, /create\("davixRelease"\)/, 'Extractor must support a stable release signing key');
 assert.match(playerLiteGradle, /create\("davixRelease"\)/, 'Player Lite must support the same stable release signing key');
 assert.match(androidWorkflow, /DAVIX_KEYSTORE_BASE64/, 'Android build workflow must read the release keystore from a GitHub secret');
+assert.match(androidWorkflow, /github\.event_name != 'pull_request'/, 'Release signing secrets must never be exposed to pull request builds');
 assert.match(androidWorkflow, /assemble\$\{DAVIX_BUILD_TYPE\}/, 'Android build workflow must select signed release or debug build consistently');
 const syntaxTemplate = template
   .replace('__CLOUD_SYNC_URL__', JSON.stringify('https://sky-cloud-sync.example.workers.dev'));
