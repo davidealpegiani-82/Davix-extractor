@@ -20,6 +20,7 @@ import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
@@ -89,6 +90,12 @@ class MainActivity : FragmentActivity() {
     private lateinit var fullscreenContainer: FrameLayout
     private lateinit var status: TextView
     private lateinit var playbackInfo: TextView
+    private lateinit var currentChannelLabel: TextView
+    private lateinit var importProgressPanel: LinearLayout
+    private lateinit var importProgressLabel: TextView
+    private lateinit var importProgressBar: ProgressBar
+    private var currentPlayingChannelUrl: String? = null
+    private var importInProgress = false
     private lateinit var count: TextView
     private lateinit var playerView: PlayerView
     private lateinit var localPlayer: ExoPlayer
@@ -347,6 +354,8 @@ class MainActivity : FragmentActivity() {
         }
         val channelName = data.getQueryParameter("name")?.takeIf { it.isNotBlank() } ?: "Canale selezionato"
         status.text = "Apertura da player web: $channelName"
+        currentPlayingChannelUrl = streamUrl
+        if (::currentChannelLabel.isInitialized) currentChannelLabel.text = "▶  IN RIPRODUZIONE · $channelName"
         playbackGeneration++
         try {
             playbackRetryTask?.let { retryHandler.removeCallbacks(it) }
@@ -448,6 +457,15 @@ class MainActivity : FragmentActivity() {
         val fullButton = buttonView("⛶ Schermo intero") { toggleFullscreen() }
         dockHeader.addView(fullButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)))
         playerDock.addView(dockHeader)
+        currentChannelLabel = TextView(this).apply {
+            text = "NESSUN CANALE IN RIPRODUZIONE"
+            textSize = 12f
+            setTextColor(CYAN)
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setPadding(dp(4), dp(5), dp(4), dp(7))
+            maxLines = 2
+        }
+        playerDock.addView(currentChannelLabel)
         playerView = PlayerView(this).apply {
             player = this@MainActivity.player
             useController = true
@@ -483,6 +501,26 @@ class MainActivity : FragmentActivity() {
         button("🌐  Importa playlist direttamente da URL", true) { importPlaylistFromUrl() }
         button("📂  Seleziona file", false) { showImportDestinationDialog() }
         status = label("Nessun file caricato.", MUTED)
+        importProgressPanel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(10), dp(8), dp(10), dp(8))
+            setBackgroundColor(PANEL)
+            visibility = View.GONE
+        }
+        importProgressLabel = TextView(this).apply {
+            text = "Preparazione importazione…"
+            textSize = 12f
+            setTextColor(Color.WHITE)
+        }
+        importProgressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 100
+            isIndeterminate = true
+            progressTintList = android.content.res.ColorStateList.valueOf(CYAN)
+            progressBackgroundTintList = android.content.res.ColorStateList.valueOf(0xFF34445A.toInt())
+        }
+        importProgressPanel.addView(importProgressLabel)
+        importProgressPanel.addView(importProgressBar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(8)).apply { topMargin = dp(7) })
+        root.addView(importProgressPanel, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4) })
 
         section("2 · PLAYLIST SALVATE")
         label("Le copie salvate restano sul dispositivo anche dopo la chiusura dell'app, finché non le elimini.", MUTED, 12f)
@@ -549,6 +587,24 @@ class MainActivity : FragmentActivity() {
         renderChannels()
     }
 
+    private fun updateImportProgress(message: String, percent: Int? = null) {
+        val update = Runnable {
+            if (!::importProgressPanel.isInitialized || isFinishing || isDestroyed) return@Runnable
+            importProgressPanel.visibility = View.VISIBLE
+            importProgressLabel.text = message
+            importProgressBar.isIndeterminate = percent == null
+            if (percent != null) importProgressBar.progress = percent.coerceIn(0, 100)
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) update.run() else runOnUiThread(update)
+    }
+
+    private fun finishImportProgress() {
+        if (!::importProgressPanel.isInitialized) return
+        importProgressPanel.visibility = View.GONE
+        importProgressBar.isIndeterminate = false
+        importProgressBar.progress = 0
+    }
+
     private fun showIptvSourceSettings() {
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -599,13 +655,16 @@ class MainActivity : FragmentActivity() {
     }
 
     private fun importPlaylistFromUrl() {
+        if (importInProgress) { toast("È già in corso un'importazione."); return }
         val address = IptvSourceSettings.playlistUrl(this)
         if (address.isBlank()) {
             toast("Configura prima l'URL della playlist M3U.")
             showIptvSourceSettings()
             return
         }
+        importInProgress = true
         status.text = "Download playlist IPTV in corso…"
+        updateImportProgress("Connessione alla sorgente IPTV…", null)
         Thread {
             try {
                 val connection = (URL(address).openConnection() as HttpURLConnection).apply {
@@ -620,6 +679,7 @@ class MainActivity : FragmentActivity() {
                 val bytes = try {
                     val code = connection.responseCode
                     if (code !in 200..299) throw IOException("Il server IPTV ha risposto HTTP $code.")
+                    val expectedBytes = connection.getHeaderFieldLong("Content-Length", -1L)
                     val output = ByteArrayOutputStream()
                     connection.inputStream.use { input ->
                         val buffer = ByteArray(32 * 1024)
@@ -630,15 +690,19 @@ class MainActivity : FragmentActivity() {
                             total += count
                             if (total > 64L * 1024L * 1024L) throw IOException("La playlist supera il limite di 64 MiB.")
                             output.write(buffer, 0, count)
+                            val percent = if (expectedBytes > 0L) ((total * 30L / expectedBytes).toInt()).coerceIn(1, 30) else null
+                            updateImportProgress("Download playlist · ${total / (1024 * 1024)} MB${if (expectedBytes > 0L) " / ${expectedBytes / (1024 * 1024)} MB" else " ricevuti"}", percent)
                         }
                     }
                     output.toByteArray()
                 } finally {
                     connection.disconnect()
                 }
+                updateImportProgress("Download completato · analisi dei canali…", 32)
                 val text = String(bytes, StandardCharsets.UTF_8).removePrefix("\uFEFF")
-                val found = parseChannels(text)
+                val found = parseChannels(text) { parsed -> updateImportProgress("Analisi playlist · $parsed%", 32 + (parsed * 0.48).toInt()) }
                 if (found.isEmpty()) throw IllegalStateException("Il collegamento non ha restituito una playlist M3U valida.")
+                updateImportProgress("Analisi completata · classificazione e controllo duplicati…", 85)
                 savePlaylistCopy("playlist-remota.m3u", bytes)
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
@@ -659,7 +723,8 @@ class MainActivity : FragmentActivity() {
                     }
                     var added = 0
                     var duplicates = 0
-                    found.forEach { channel ->
+                    found.forEachIndexed { index, channel ->
+                        if (index % 250 == 0) updateImportProgress("Inserimento canali · ${index + 1} / ${found.size}", 85 + (index * 14 / found.size.coerceAtLeast(1)))
                         val key = channel.name.lowercase(Locale.ROOT) + "|" + channel.url
                         if (!knownChannelKeys.add(key)) {
                             duplicates++
@@ -672,10 +737,14 @@ class MainActivity : FragmentActivity() {
                     }
                     renderChannels()
                     renderSavedPlaylists()
+                    importInProgress = false
+                    finishImportProgress()
                     status.text = "Playlist URL analizzata · " + found.size + " canali letti · " + added + " nuovi · " + duplicates + " duplicati ignorati."
                 }
             } catch (e: Exception) {
                 runOnUiThread {
+                    importInProgress = false
+                    finishImportProgress()
                     if (!isFinishing && !isDestroyed) {
                         status.text = "Download M3U non riuscito: " + (e.message ?: "errore di rete")
                         toast(status.text.toString())
@@ -1309,6 +1378,8 @@ class MainActivity : FragmentActivity() {
                     player.stop()
                     player.clearMediaItems()
                 }
+                currentPlayingChannelUrl = null
+                if (::currentChannelLabel.isInitialized) currentChannelLabel.text = "NESSUN CANALE IN RIPRODUZIONE"
                 renderChannels()
                 renderSavedPlaylists()
                 status.text = "Archivio svuotato. Puoi caricare una nuova playlist."
@@ -1339,7 +1410,7 @@ class MainActivity : FragmentActivity() {
         }
     }
 
-    private fun parseChannels(text: String): List<TvChannel> {
+    private fun parseChannels(text: String, onProgress: ((Int) -> Unit)? = null): List<TvChannel> {
         val found = mutableListOf<TvChannel>()
         val seen = mutableSetOf<String>()
         fun add(nameRaw: String?, urlRaw: String?, logoRaw: String? = "", categoryRaw: String? = null, tvgIdRaw: String? = null, tvgNameRaw: String? = null) {
@@ -1355,6 +1426,8 @@ class MainActivity : FragmentActivity() {
 
         // Scansione lineare: cercare la URL con lines.drop(i + 1) per ogni
         // #EXTINF rendeva il parser quadratico sulle playlist IPTV molto grandi.
+        val totalLines = (text.count { it == '\n' } + 1).coerceAtLeast(1)
+        var processedLines = 0
         val lines = text.lineSequence()
         var pendingName: String? = null
         var pendingLogo = ""
@@ -1362,6 +1435,8 @@ class MainActivity : FragmentActivity() {
         var pendingTvgId = ""
         var pendingTvgName = ""
         for (rawLine in lines) {
+            processedLines++
+            if (processedLines % 250 == 0) onProgress?.invoke((processedLines * 100 / totalLines).coerceIn(0, 99))
             val line = rawLine.trim()
             if (line.startsWith("#EXTINF", true)) {
                 pendingName = line.substringAfterLast(',').trim()
@@ -1431,6 +1506,7 @@ class MainActivity : FragmentActivity() {
                 )
             }
         } catch (_: Exception) { }
+        onProgress?.invoke(100)
         return found
     }
 
@@ -1445,11 +1521,12 @@ class MainActivity : FragmentActivity() {
         otherHeading.visibility = if (others.isEmpty()) View.GONE else View.VISIBLE
 
         fun addChannelRow(index: Int, channel: TvChannel, target: LinearLayout) {
+            val isPlayingChannel = currentPlayingChannelUrl == channel.url
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(dp(8), dp(5), dp(8), dp(5))
-                setBackgroundColor(PANEL)
+                setBackgroundColor(if (isPlayingChannel) 0xFF173A4D.toInt() else PANEL)
             }
             val check = CheckBox(this).apply {
                 isChecked = channel.selected
@@ -1473,11 +1550,11 @@ class MainActivity : FragmentActivity() {
                 row.addView(bulkCheck)
             }
             val play = Button(this).apply {
-                text = "▶  ${channel.name}"
+                text = if (isPlayingChannel) "▶  IN ONDA · ${channel.name}" else "▶  ${channel.name}"
                 isAllCaps = false
                 textSize = 13f
                 gravity = Gravity.CENTER_VERTICAL or Gravity.START
-                setTextColor(Color.WHITE)
+                setTextColor(if (isPlayingChannel) CYAN else Color.WHITE)
                 setBackgroundColor(Color.TRANSPARENT)
                 setOnClickListener { playChannel(index) }
             }
@@ -1744,6 +1821,9 @@ class MainActivity : FragmentActivity() {
 
     private fun playChannel(index: Int) {
         val channel = channels.getOrNull(index) ?: return
+        currentPlayingChannelUrl = channel.url
+        if (::currentChannelLabel.isInitialized) currentChannelLabel.text = "▶  IN RIPRODUZIONE · ${channel.name}"
+        renderChannels()
         playbackGeneration++
         status.text = "Avvio: ${channel.name}"
         try {
