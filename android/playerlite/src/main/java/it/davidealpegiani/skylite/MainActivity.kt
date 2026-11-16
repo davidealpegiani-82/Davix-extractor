@@ -126,6 +126,7 @@ class MainActivity : Activity() {
     private var lastReportedPlaybackState = Player.STATE_IDLE
     private var lastPlayerError = "nessuno"
     private var lastHttpStatusCode: Int? = null
+    private var lastServerRetryAfterMs = 0L
     private lateinit var endpointInput: EditText
     private lateinit var activationCodeInput: EditText
     private lateinit var pairButton: Button
@@ -1149,6 +1150,7 @@ class MainActivity : Activity() {
         retryCount = 0
         lastPlayerError = "nessuno"
         lastHttpStatusCode = null
+        lastServerRetryAfterMs = 0L
         lastHlsLoad = "in attesa del primo segmento"
         rebufferCount = 0
         lastReportedPlaybackState = Player.STATE_IDLE
@@ -1474,7 +1476,9 @@ class MainActivity : Activity() {
         val scheduledGeneration = playbackGeneration
 
         val delays = longArrayOf(2_000L, 4_000L, 8_000L, 15_000L, 30_000L, 45_000L, 60_000L)
-        val delay = if (immediate) 1_000L else delays[retryCount.coerceAtMost(delays.lastIndex)]
+        val localDelay = delays[retryCount.coerceAtMost(delays.lastIndex)]
+        val delay = if (immediate) 1_000L else maxOf(localDelay, lastServerRetryAfterMs).coerceAtMost(300_000L)
+        lastServerRetryAfterMs = 0L
         if (!immediate) retryCount = (retryCount + 1).coerceAtMost(10_000)
         statusView.text = "$reason · tentativo automatico tra ${delay / 1000}s"
         recordPlaybackDiagnostic("$reason; nuovo tentativo tra ${delay / 1000}s")
@@ -1517,6 +1521,14 @@ class MainActivity : Activity() {
     // 403/406 restano recuperabili: CDN e protezioni anti-hotlink possono essere transitorie.
     private fun isRetryableHttpStatus(code: Int): Boolean =
         code == 403 || code == 406 || code == 408 || code == 425 || code == 429 || code in 500..599
+
+    private fun retryAfterDelayMs(response: HttpDataSource.InvalidResponseCodeException): Long {
+        val seconds = response.headerFields.entries
+            .firstOrNull { it.key.equals("Retry-After", ignoreCase = true) }
+            ?.value?.firstOrNull()?.trim()?.toLongOrNull()
+            ?: return 0L
+        return (seconds * 1_000L).coerceIn(0L, 300_000L)
+    }
 
     private fun isRetryablePlaybackError(error: PlaybackException): Boolean {
         val name = error.errorCodeName
@@ -1642,6 +1654,7 @@ class MainActivity : Activity() {
                         while (cause != null) {
                             if (cause is HttpDataSource.InvalidResponseCodeException) {
                                 httpCode = cause.responseCode
+                                lastServerRetryAfterMs = retryAfterDelayMs(cause)
                                 break
                             }
                             cause = cause.cause
@@ -1769,6 +1782,7 @@ class MainActivity : Activity() {
         terminalPlaybackFailure = false
         lastPlayerError = "nessuno"
         lastHttpStatusCode = null
+        lastServerRetryAfterMs = 0L
         lastHlsLoad = "in attesa del primo segmento"
         rebufferCount = 0
         lastReportedPlaybackState = Player.STATE_IDLE
