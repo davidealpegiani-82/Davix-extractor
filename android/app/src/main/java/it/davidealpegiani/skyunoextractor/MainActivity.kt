@@ -643,21 +643,30 @@ class MainActivity : FragmentActivity() {
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
                     restoreChannelCategories(found)
+                    // Le playlist IPTV possono contenere migliaia di canali.
+                    // Evita ricerche lineari ripetute in "channels" e "categories":
+                    // il precedente controllo channels.any per ogni elemento
+                    // trasformava l'importazione in un'operazione quadratica.
+                    val knownChannelKeys = channels.asSequence()
+                        .map { it.name.lowercase(Locale.ROOT) + "|" + it.url }
+                        .toHashSet()
+                    val knownCategoryPaths = categories.toHashSet()
                     found.forEach { channel ->
                         val savedManualPath = normalizeCategoryPath(channel.category)
                         val inferred = inferCategoryPath(channel)
-                        channel.category = if (savedManualPath.contains(" > ") && savedManualPath in categories) savedManualPath else inferred
-                        if (channel.category !in categories) categories.add(channel.category)
+                        channel.category = if (savedManualPath.contains(" > ") && savedManualPath in knownCategoryPaths) savedManualPath else inferred
+                        if (knownCategoryPaths.add(channel.category)) categories.add(channel.category)
                     }
                     var added = 0
                     var duplicates = 0
                     found.forEach { channel ->
-                        if (channels.any { it.name.equals(channel.name, true) && it.url == channel.url }) {
+                        val key = channel.name.lowercase(Locale.ROOT) + "|" + channel.url
+                        if (!knownChannelKeys.add(key)) {
                             duplicates++
                         } else {
                             channel.selected = !(channel.name.contains("sky", true) && (channel.name.contains("plus", true) || channel.name.contains("+1")))
                             channels.add(channel)
-                            if (channel.category !in categories) categories.add(channel.category)
+                            if (knownCategoryPaths.add(channel.category)) categories.add(channel.category)
                             added++
                         }
                     }
