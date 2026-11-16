@@ -44,6 +44,7 @@ import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.hls.HlsMediaSource
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.LoadEventInfo
 import androidx.media3.exoplayer.source.MediaLoadData
 import androidx.media3.ui.PlayerView
@@ -148,16 +149,16 @@ class MainActivity : FragmentActivity() {
         window.statusBarColor = BG
         window.navigationBarColor = BG
         window.decorView.systemUiVisibility = 0
-        // Profilo scelto dopo il confronto delle revisioni:
-        // Profilo live allineato al Player Lite: riserva ampia senza inseguire il live edge.
+        // Profilo più leggero per dispositivi TV/Android con memoria limitata.
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                60_000, // soglia minima di caricamento
-                180_000, // tetto temporale per assorbire oscillazioni di rete
-                15_000, // avvio iniziale
-                45_000 // ripresa dopo esaurimento del buffer
+                15_000, // buffer minimo
+                60_000, // limite massimo: evita riserve eccessive
+                5_000, // avvio iniziale più rapido
+                10_000 // ripresa dopo esaurimento del buffer
             )
-            .setPrioritizeTimeOverSizeThresholds(true)
+            .setTargetBufferBytes(48 * 1024 * 1024)
+            .setPrioritizeTimeOverSizeThresholds(false)
             .build()
 
         // Dopo ogni rebuffer Media3 aumenta il margine dal bordo live, così il
@@ -168,19 +169,28 @@ class MainActivity : FragmentActivity() {
             .setTargetLiveOffsetIncrementOnRebufferMs(15_000)
             .build()
 
-        // Timeout espliciti e retry progressivi gestiti da Media3.
+        // Usa uno User-Agent Android/browser invece di identificare le richieste
+        // come DAVIX: alcuni provider accettano Wiseplay/browser e rifiutano UA custom.
+        val defaultUserAgent = runCatching {
+            android.webkit.WebSettings.getDefaultUserAgent(this)
+        }.getOrDefault("Mozilla/5.0 (Linux; Android) AppleWebKit/537.36 Chrome Safari/537.36")
         val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+            .setUserAgent(defaultUserAgent)
+            .setDefaultRequestProperties(mapOf("Accept" to "*/*"))
             .setConnectTimeoutMs(15_000)
             .setReadTimeoutMs(45_000)
             .setAllowCrossProtocolRedirects(true)
 
-        val hlsMediaSourceFactory = HlsMediaSource.Factory(httpDataSourceFactory)
+        // La factory standard riconosce HLS, DASH e flussi progressivi:
+        // non forziamo più ogni URL a essere interpretato come HLS.
+        val mediaSourceFactory = DefaultMediaSourceFactory(this)
+            .setDataSourceFactory(httpDataSourceFactory)
             .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(8))
 
         localPlayer = ExoPlayer.Builder(this)
             .setLoadControl(loadControl)
             .setLivePlaybackSpeedControl(liveSpeedControl)
-            .setMediaSourceFactory(hlsMediaSourceFactory)
+            .setMediaSourceFactory(mediaSourceFactory)
             .build()
 
         // Diagnostica HLS: registra manifest/segmenti e problemi HTTP senza
@@ -361,10 +371,11 @@ class MainActivity : FragmentActivity() {
             playbackRetryTask?.let { retryHandler.removeCallbacks(it) }
             playbackRetryTask = null
             playbackRetryCount = 0
-            val mediaItem = MediaItem.Builder()
+            val mediaItemBuilder = MediaItem.Builder()
                 .setUri(streamUrl)
-                .setMimeType(MimeTypes.APPLICATION_M3U8)
                 .setMediaMetadata(MediaMetadata.Builder().setTitle(channelName).build())
+            streamMimeType(streamUrl)?.let { mediaItemBuilder.setMimeType(it) }
+            val mediaItem = mediaItemBuilder
                 .setLiveConfiguration(
                     MediaItem.LiveConfiguration.Builder()
                         .setTargetOffsetMs(60_000)
@@ -736,6 +747,8 @@ class MainActivity : FragmentActivity() {
                         }
                     }
                     renderChannels()
+                    saveCategorySettings()
+                    persistChannelLibrary()
                     renderSavedPlaylists()
                     importInProgress = false
                     finishImportProgress()
@@ -1560,8 +1573,8 @@ class MainActivity : FragmentActivity() {
     }
 
     private fun renderChannels() {
-        saveCategorySettings()
-        persistChannelLibrary()
+        // Il rendering non deve serializzare migliaia di URL su disco ad ogni
+        // click/espansione: il salvataggio avviene nei punti di modifica e onStop.
         selectedList.removeAllViews()
         otherList.removeAllViews()
         val selected = channels.withIndex().filter { it.value.selected }
@@ -1868,6 +1881,17 @@ class MainActivity : FragmentActivity() {
         count.text = "${channels.size} canali importati · ${channels.count { it.selected }} selezionati per esportazione"
     }
 
+    private fun streamMimeType(rawUrl: String): String? {
+        val path = runCatching { Uri.parse(rawUrl.substringBefore('|')).lastPathSegment.orEmpty().lowercase(Locale.ROOT) }
+            .getOrDefault("")
+        return when {
+            path.endsWith(".m3u8") -> MimeTypes.APPLICATION_M3U8
+            path.endsWith(".mpd") -> MimeTypes.APPLICATION_MPD
+            path.endsWith(".ism") || path.endsWith(".isml") -> MimeTypes.APPLICATION_SS
+            else -> null
+        }
+    }
+
     private fun playChannel(index: Int) {
         val channel = channels.getOrNull(index) ?: return
         currentPlayingChannelUrl = channel.url
@@ -1879,11 +1903,13 @@ class MainActivity : FragmentActivity() {
             playbackRetryTask?.let { retryHandler.removeCallbacks(it) }
             playbackRetryTask = null
             playbackRetryCount = 0
-            // Dichiarazione HLS esplicita anche per URL con token o senza estensione .m3u8.
-            val mediaItem = MediaItem.Builder()
+            // Imposta il MIME solo quando il formato è riconoscibile dall'URL.
+            // Per gli altri flussi lascia decidere a Media3 (TS, MP4, ecc.).
+            val mediaItemBuilder = MediaItem.Builder()
                 .setUri(channel.url)
-                .setMimeType(MimeTypes.APPLICATION_M3U8)
                 .setMediaMetadata(MediaMetadata.Builder().setTitle(channel.name).build())
+            streamMimeType(channel.url)?.let { mediaItemBuilder.setMimeType(it) }
+            val mediaItem = mediaItemBuilder
                 .setLiveConfiguration(
                     MediaItem.LiveConfiguration.Builder()
                         .setTargetOffsetMs(45_000)
