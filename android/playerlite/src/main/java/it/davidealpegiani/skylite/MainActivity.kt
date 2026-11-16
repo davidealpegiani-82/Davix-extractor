@@ -6,6 +6,8 @@ import android.graphics.Color
 import android.content.res.Configuration
 import android.os.Build
 import android.net.Uri
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -157,6 +159,7 @@ class MainActivity : Activity() {
     private var bufferingStartedAt = 0L
     private var lastPlaybackProgressAt = 0L
     private var lastObservedPositionMs = C.TIME_UNSET
+    private var lastKnownNetworkAvailable: Boolean? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -1360,6 +1363,13 @@ class MainActivity : Activity() {
      * Controllo di salute indipendente dagli eventi ExoPlayer: intercetta anche
      * i casi in cui la riproduzione resta apparentemente pronta ma il tempo non avanza.
      */
+    private fun isInternetAvailable(): Boolean {
+        val connectivity = getSystemService(CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
+        val network = connectivity.activeNetwork ?: return false
+        val capabilities = connectivity.getNetworkCapabilities(network) ?: return false
+        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }
+
     private fun monitorPlaybackHealth(current: ExoPlayer, now: Long, bufferedAheadMs: Long) {
         if (!current.playWhenReady || current.mediaItemCount == 0 ||
             selectedChannelForRecovery == null || isFinishing || isDestroyed) {
@@ -1369,10 +1379,30 @@ class MainActivity : Activity() {
             return
         }
 
+        val networkAvailable = isInternetAvailable()
+        if (!networkAvailable) {
+            lastKnownNetworkAvailable = false
+            if (retryTask != null) cancelPendingRecovery()
+            bufferingStartedAt = 0L
+            lastPlaybackProgressAt = now
+            statusView.text = "Connessione Internet assente · attendo il ripristino…"
+            return
+        }
+        val networkJustReturned = lastKnownNetworkAvailable == false
+        lastKnownNetworkAvailable = true
+        if (networkJustReturned) {
+            bufferingStartedAt = now
+            lastPlaybackProgressAt = now
+            schedulePlaybackRecovery("Connessione Internet ripristinata", immediate = true)
+        }
+
         val position = current.currentPosition
-        if (lastObservedPositionMs == C.TIME_UNSET || position > lastObservedPositionMs + 250L) {
+        if (lastObservedPositionMs == C.TIME_UNSET ||
+            position > lastObservedPositionMs + 250L ||
+            position < lastObservedPositionMs - 250L) {
             lastObservedPositionMs = position
             lastPlaybackProgressAt = now
+            if (retryTask != null) cancelPendingRecovery()
         }
 
         when (current.playbackState) {
@@ -1407,22 +1437,22 @@ class MainActivity : Activity() {
      * Retry persistente con backoff limitato: non abbandona il canale dopo N errori.
      * Il nuovo prepare parte dal live edge, evitando segmenti HLS ormai scaduti.
      */
-    private fun schedulePlaybackRecovery(reason: String) {
-        if (retryTask != null || !PlayerCloudSync.hasValidLease(this)) return
+    private fun schedulePlaybackRecovery(reason: String, immediate: Boolean = false) {
+        if (retryTask != null || !PlayerCloudSync.hasValidLease(this) || !isInternetAvailable()) return
         val channel = selectedChannelForRecovery ?: return
         val current = player ?: return
         if (!current.playWhenReady || isFinishing || isDestroyed) return
         val scheduledGeneration = playbackGeneration
 
         val delays = longArrayOf(2_000L, 4_000L, 8_000L, 15_000L, 30_000L, 45_000L, 60_000L)
-        val delay = delays[retryCount.coerceAtMost(delays.lastIndex)]
-        retryCount = (retryCount + 1).coerceAtMost(10_000)
+        val delay = if (immediate) 1_000L else delays[retryCount.coerceAtMost(delays.lastIndex)]
+        if (!immediate) retryCount = (retryCount + 1).coerceAtMost(10_000)
         statusView.text = "$reason · tentativo automatico tra ${delay / 1000}s"
 
         val task = Runnable {
             retryTask = null
             val activePlayer = player ?: return@Runnable
-            if (!activePlayer.playWhenReady || !PlayerCloudSync.hasValidLease(this) ||
+            if (!activePlayer.playWhenReady || !PlayerCloudSync.hasValidLease(this) || !isInternetAvailable() ||
                 scheduledGeneration != playbackGeneration || selectedChannelForRecovery?.url != channel.url) return@Runnable
 
             bufferingStartedAt = System.currentTimeMillis()
@@ -1452,10 +1482,17 @@ class MainActivity : Activity() {
         else -> "risposta HTTP non valida"
     }
 
-    // 404/410 sono gli unici status HTTP che trattiamo come flusso rimosso/chiuso.
-    // Tutti gli altri (inclusi 401/403/406/429 e 5xx) vengono ritentati:
-    // CDN e provider possono applicare blocchi o rate-limit temporanei.
-    private fun isRetryableHttpStatus(code: Int): Boolean = code != 404 && code != 410
+    // Evita retry continui su credenziali errate o richieste malformate.
+    // 403/406 restano recuperabili: CDN e protezioni anti-hotlink possono essere transitorie.
+    private fun isRetryableHttpStatus(code: Int): Boolean =
+        code == 403 || code == 406 || code == 408 || code == 425 || code == 429 || code in 500..599
+
+    private fun isRetryablePlaybackError(error: PlaybackException): Boolean {
+        val name = error.errorCodeName
+        return name.startsWith("ERROR_CODE_IO_") ||
+            name.contains("TIMEOUT") ||
+            name.contains("BEHIND_LIVE_WINDOW")
+    }
 
     /**
      * Scarta gli eventi Analytics appartenenti a una timeline/canale precedente.
@@ -1580,10 +1617,10 @@ class MainActivity : Activity() {
                             isRetryableHttpStatus(httpCode)
                         } else {
                             lastPlayerError = error.errorCodeName
-                            // Anche errori IO, timeout, live-window e risposte malformate
-                            // possono essere transitori: il retry è persistente e limitato
-                            // nel ritmo, non nel numero di tentativi.
-                            true
+                            // Recuperiamo gli errori di rete e la perdita della live window.
+                            // Errori di parsing/decoder/configurazione non si risolvono riavviando
+                            // all'infinito lo stesso flusso.
+                            isRetryablePlaybackError(error)
                         }
 
                         if (retryable) {
