@@ -74,6 +74,28 @@ jobs:
             echo "stable_signing=false" >> "$GITHUB_OUTPUT"
             echo "::warning::Stable Android signing is not configured; APKs will use temporary debug signing."
           fi
+      - name: Prepare automatic Extractor version
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest_url="https://github.com/davidealpegiani-82/sky-uno-extractor/releases/download/player-lite-latest/version.json"
+          current_manifest="$(curl --fail --silent --show-error --location "$manifest_url")"
+          CURRENT_MANIFEST="$current_manifest" python3 - <<'PY' >> "$GITHUB_ENV"
+          import json
+          import os
+
+          current = json.loads(os.environ["CURRENT_MANIFEST"])["extractor"]
+          next_code = int(current["versionCode"]) + 1
+          parts = str(current["versionName"]).split(".")
+          if not parts or not parts[-1].isdigit():
+              raise SystemExit("Extractor versionName is not a numeric semantic version")
+          parts[-1] = str(int(parts[-1]) + 1)
+          next_name = ".".join(parts)
+          print(f"DAVIX_EXTRACTOR_VERSION_CODE={next_code}")
+          print(f"DAVIX_EXTRACTOR_VERSION_NAME={next_name}")
+          print(f"Next DAVIX Extractor version: {next_name} ({next_code})")
+          PY
       - name: Build both APKs
         working-directory: android
         env:
