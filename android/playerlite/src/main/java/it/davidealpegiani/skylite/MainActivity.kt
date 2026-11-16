@@ -126,6 +126,7 @@ class MainActivity : Activity() {
     private var lastReportedPlaybackState = Player.STATE_IDLE
     private var lastPlayerError = "nessuno"
     private var lastHttpStatusCode: Int? = null
+    private var lastServerRetryAfterMs = 0L
     private lateinit var endpointInput: EditText
     private lateinit var activationCodeInput: EditText
     private lateinit var pairButton: Button
@@ -160,6 +161,10 @@ class MainActivity : Activity() {
     private var lastPlaybackProgressAt = 0L
     private var lastObservedPositionMs = C.TIME_UNSET
     private var lastKnownNetworkAvailable: Boolean? = null
+    // Impedisce al watchdog STATE_IDLE di riavviare errori permanenti (404, 401, parsing/decoder).
+    private var terminalPlaybackFailure = false
+    // Cronologia circolare locale: conserva solo eventi tecnici, mai URL o token.
+    private val playbackDiagnosticEvents = mutableListOf<String>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -310,6 +315,17 @@ class MainActivity : Activity() {
             background = android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(Color.rgb(15, 46, 65), Color.rgb(18, 32, 54))).apply { cornerRadius = dp(8).toFloat(); setStroke(dp(1), Color.rgb(36, 111, 145)) }
         }
         controls.addView(diagnosticsView)
+        diagnosticsView.setOnLongClickListener {
+            val report = synchronized(playbackDiagnosticEvents) {
+                if (playbackDiagnosticEvents.isEmpty()) "Nessun evento registrato." else playbackDiagnosticEvents.joinToString("\n")
+            }
+            AlertDialog.Builder(this@MainActivity)
+                .setTitle("Diagnostica DAVIX Player")
+                .setMessage(report)
+                .setPositiveButton("Chiudi", null)
+                .show()
+            true
+        }
         diagnosticsView.visibility = if (PlayerCloudSync.hasValidLease(this)) View.VISIBLE else View.GONE
 
         updatesButton = TextView(this).apply {
@@ -1060,6 +1076,14 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun recordPlaybackDiagnostic(message: String) {
+        val timestamp = android.text.format.DateFormat.format("HH:mm:ss", System.currentTimeMillis())
+        synchronized(playbackDiagnosticEvents) {
+            playbackDiagnosticEvents.add("$timestamp · $message")
+            if (playbackDiagnosticEvents.size > 40) playbackDiagnosticEvents.removeAt(0)
+        }
+    }
+
     private fun cancelPendingRecovery(invalidateGeneration: Boolean = true) {
         if (invalidateGeneration) playbackGeneration++
         retryTask?.let { retryHandler.removeCallbacks(it) }
@@ -1118,12 +1142,15 @@ class MainActivity : Activity() {
         titleView.text = channel.name
         statusView.text = "Connessione al flusso…"
         selectedChannelForRecovery = channel
+        terminalPlaybackFailure = false
+        recordPlaybackDiagnostic("Selezionato canale: ${channel.name}")
         bufferingStartedAt = System.currentTimeMillis()
         lastPlaybackProgressAt = bufferingStartedAt
         lastObservedPositionMs = C.TIME_UNSET
         retryCount = 0
         lastPlayerError = "nessuno"
         lastHttpStatusCode = null
+        lastServerRetryAfterMs = 0L
         lastHlsLoad = "in attesa del primo segmento"
         rebufferCount = 0
         lastReportedPlaybackState = Player.STATE_IDLE
@@ -1372,7 +1399,7 @@ class MainActivity : Activity() {
 
     private fun monitorPlaybackHealth(current: ExoPlayer, now: Long, bufferedAheadMs: Long) {
         if (!current.playWhenReady || current.mediaItemCount == 0 ||
-            selectedChannelForRecovery == null || isFinishing || isDestroyed) {
+            selectedChannelForRecovery == null || isFinishing || isDestroyed || terminalPlaybackFailure) {
             bufferingStartedAt = 0L
             lastPlaybackProgressAt = now
             lastObservedPositionMs = current.currentPosition
@@ -1387,11 +1414,13 @@ class MainActivity : Activity() {
             lastPlaybackProgressAt = now
             lastObservedPositionMs = current.currentPosition
             statusView.text = "Connessione Internet assente · attendo il ripristino…"
+            recordPlaybackDiagnostic("Connettività assente: recupero sospeso")
             return
         }
         val networkJustReturned = lastKnownNetworkAvailable == false
         lastKnownNetworkAvailable = true
         if (networkJustReturned) {
+            recordPlaybackDiagnostic("Connettività ripristinata: avvio recupero")
             bufferingStartedAt = now
             lastPlaybackProgressAt = now
             lastObservedPositionMs = current.currentPosition
@@ -1447,9 +1476,12 @@ class MainActivity : Activity() {
         val scheduledGeneration = playbackGeneration
 
         val delays = longArrayOf(2_000L, 4_000L, 8_000L, 15_000L, 30_000L, 45_000L, 60_000L)
-        val delay = if (immediate) 1_000L else delays[retryCount.coerceAtMost(delays.lastIndex)]
+        val localDelay = delays[retryCount.coerceAtMost(delays.lastIndex)]
+        val delay = if (immediate) 1_000L else maxOf(localDelay, lastServerRetryAfterMs).coerceAtMost(300_000L)
+        lastServerRetryAfterMs = 0L
         if (!immediate) retryCount = (retryCount + 1).coerceAtMost(10_000)
         statusView.text = "$reason · tentativo automatico tra ${delay / 1000}s"
+        recordPlaybackDiagnostic("$reason; nuovo tentativo tra ${delay / 1000}s")
 
         val task = Runnable {
             retryTask = null
@@ -1461,6 +1493,7 @@ class MainActivity : Activity() {
             lastPlaybackProgressAt = bufferingStartedAt
             lastObservedPositionMs = C.TIME_UNSET
             statusView.text = "Riconnessione a ${channel.name}…"
+            recordPlaybackDiagnostic("Riavvio controllato del flusso: ${channel.name}")
             activePlayer.stop()
             activePlayer.clearMediaItems()
             activePlayer.setMediaItem(createLiveMediaItem(Uri.parse(channel.url)))
@@ -1489,6 +1522,14 @@ class MainActivity : Activity() {
     private fun isRetryableHttpStatus(code: Int): Boolean =
         code == 403 || code == 406 || code == 408 || code == 425 || code == 429 || code in 500..599
 
+    private fun retryAfterDelayMs(response: HttpDataSource.InvalidResponseCodeException): Long {
+        val seconds = response.headerFields.entries
+            .firstOrNull { it.key.equals("Retry-After", ignoreCase = true) }
+            ?.value?.firstOrNull()?.trim()?.toLongOrNull()
+            ?: return 0L
+        return (seconds * 1_000L).coerceIn(0L, 300_000L)
+    }
+
     private fun isRetryablePlaybackError(error: PlaybackException): Boolean {
         val name = error.errorCodeName
         return name.startsWith("ERROR_CODE_IO_") ||
@@ -1510,12 +1551,15 @@ class MainActivity : Activity() {
     private fun initializePlayer() {
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                60_000,
-                180_000,
-                15_000,
-                45_000
+                30_000,
+                90_000,
+                8_000,
+                15_000
             )
-            .setPrioritizeTimeOverSizeThresholds(true)
+            // Limita la memoria occupata dai segmenti: la durata del buffer non deve
+            // crescere senza controllo su TV con memoria ridotta.
+            .setTargetBufferBytes(96 * 1024 * 1024)
+            .setPrioritizeTimeOverSizeThresholds(false)
             .build()
 
         // Allinea le richieste HLS al profilo HTTP del browser Android:
@@ -1543,6 +1587,7 @@ class MainActivity : Activity() {
             .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(8))
 
         player = ExoPlayer.Builder(this)
+            .setRenderersFactory(androidx.media3.exoplayer.DefaultRenderersFactory(this).setEnableDecoderFallback(true))
             .setLoadControl(loadControl)
             .setLivePlaybackSpeedControl(liveSpeedControl)
             .setMediaSourceFactory(mediaSourceFactory)
@@ -1584,6 +1629,7 @@ class MainActivity : Activity() {
                                 cause = cause.cause
                             }
                             if (httpCode != null) {
+                                recordPlaybackDiagnostic("Errore caricamento $kind HTTP $httpCode")
                                 lastHttpStatusCode = httpCode
                                 lastHlsLoad = "errore $kind HTTP $httpCode · ${describeHttpStatus(httpCode)}"
                             } else {
@@ -1608,6 +1654,7 @@ class MainActivity : Activity() {
                         while (cause != null) {
                             if (cause is HttpDataSource.InvalidResponseCodeException) {
                                 httpCode = cause.responseCode
+                                lastServerRetryAfterMs = retryAfterDelayMs(cause)
                                 break
                             }
                             cause = cause.cause
@@ -1625,7 +1672,9 @@ class MainActivity : Activity() {
                             isRetryablePlaybackError(error)
                         }
 
+                        recordPlaybackDiagnostic("Errore player ${error.errorCodeName}${httpCode?.let { " · HTTP $it" } ?: ""}")
                         if (retryable) {
+                            terminalPlaybackFailure = false
                             bufferingStartedAt = System.currentTimeMillis()
                             val reason = if (httpCode != null) {
                                 "HTTP $httpCode · ${describeHttpStatus(httpCode)}: nuovo tentativo"
@@ -1634,13 +1683,17 @@ class MainActivity : Activity() {
                             }
                             schedulePlaybackRecovery(reason)
                         } else {
-                            statusView.text = "Canale non disponibile (HTTP $httpCode)."
+                            terminalPlaybackFailure = true
+                            recordPlaybackDiagnostic("Errore non recuperabile: ${httpCode?.let { "HTTP $it" } ?: error.errorCodeName}")
+                            val detail = if (httpCode != null) "HTTP $httpCode · ${describeHttpStatus(httpCode)}" else error.errorCodeName
+                            statusView.text = "Riproduzione non recuperabile: $detail. Verifica la sorgente o prova un altro canale."
                             cancelPendingRecovery()
                         }
                     }
 
                     override fun onIsPlayingChanged(isPlaying: Boolean) {
                         if (isPlaying) {
+                            recordPlaybackDiagnostic("Riproduzione effettiva avviata")
                             lastPlaybackProgressAt = System.currentTimeMillis()
                             bufferingStartedAt = 0L
                             // Un reset di stabilità appartenente al canale precedente non deve
@@ -1726,8 +1779,10 @@ class MainActivity : Activity() {
         // Il MIME esplicito evita ambiguità con flussi HLS senza estensione .m3u8.
         cancelPendingRecovery()
         selectedChannelForRecovery = CloudChannel(channelName, streamUrl)
+        terminalPlaybackFailure = false
         lastPlayerError = "nessuno"
         lastHttpStatusCode = null
+        lastServerRetryAfterMs = 0L
         lastHlsLoad = "in attesa del primo segmento"
         rebufferCount = 0
         lastReportedPlaybackState = Player.STATE_IDLE
