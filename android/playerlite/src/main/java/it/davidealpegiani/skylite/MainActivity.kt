@@ -1385,6 +1385,7 @@ class MainActivity : Activity() {
             if (retryTask != null) cancelPendingRecovery()
             bufferingStartedAt = 0L
             lastPlaybackProgressAt = now
+            lastObservedPositionMs = current.currentPosition
             statusView.text = "Connessione Internet assente · attendo il ripristino…"
             return
         }
@@ -1393,6 +1394,7 @@ class MainActivity : Activity() {
         if (networkJustReturned) {
             bufferingStartedAt = now
             lastPlaybackProgressAt = now
+            lastObservedPositionMs = current.currentPosition
             schedulePlaybackRecovery("Connessione Internet ripristinata", immediate = true)
         }
 
