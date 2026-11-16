@@ -1235,48 +1235,73 @@ class MainActivity : FragmentActivity() {
     }
 
     private fun importUris(uris: List<Uri>) {
-        var added = 0
-        var duplicates = 0
-        var invalid = 0
-        uris.forEach { uri ->
-            try {
-                val bytes = readImportBytes(uri)
-                val text = String(bytes, StandardCharsets.UTF_8)
-                val displayName = queryDisplayName(uri)
-                val found = parseChannels(text)
-                restoreChannelCategories(found)
-                pendingImportCategory?.let { destination ->
-                    found.forEach { it.category = destination }
-                    if (destination !in categories) categories.add(destination)
-                } ?: run {
-                    found.forEach { channel ->
-                        // Le categorie manuali già salvate restano intatte.
-                        val savedManualPath = normalizeCategoryPath(channel.category)
-                        val inferred = inferCategoryPath(channel)
-                        channel.category = if (savedManualPath.contains(" > ") && savedManualPath in categories) savedManualPath else inferred
-                        if (channel.category !in categories) categories.add(channel.category)
+        if (uris.isEmpty()) return
+        if (importInProgress) { toast("È già in corso un'importazione."); return }
+        importInProgress = true
+        val destination = pendingImportCategory
+        updateImportProgress("Preparazione importazione di ${uris.size} file…", null)
+        Thread {
+            val parsedFiles = mutableListOf<Triple<String, ByteArray, List<TvChannel>>>()
+            var invalid = 0
+            uris.forEachIndexed { index, uri ->
+                try {
+                    updateImportProgress("Lettura file ${index + 1}/${uris.size}…", null)
+                    val bytes = readImportBytes(uri) { total ->
+                        updateImportProgress("Lettura file ${index + 1}/${uris.size} · ${total / (1024 * 1024)} MB", null)
                     }
-                }
-                if (found.isEmpty()) {
+                    val displayName = queryDisplayName(uri)
+                    updateImportProgress("Analisi ${displayName} · file ${index + 1}/${uris.size}", (index * 100 / uris.size).coerceIn(0, 99))
+                    val found = parseChannels(String(bytes, StandardCharsets.UTF_8)) { parsed ->
+                        val overall = ((index * 100L + parsed) / uris.size).toInt()
+                        updateImportProgress("Analisi ${displayName} · $parsed%", overall.coerceIn(0, 99))
+                    }
+                    if (found.isEmpty()) invalid++ else {
+                        savePlaylistCopy(displayName, bytes)
+                        parsedFiles.add(Triple(displayName, bytes, found))
+                    }
+                } catch (e: Exception) {
                     invalid++
-                } else {
-                    savePlaylistCopy(displayName, bytes)
-                    found.forEach { ch ->
-                        if (channels.any { it.name.equals(ch.name, true) && it.url == ch.url }) duplicates++
+                    Log.w("DAVIX-IMPORT", "Importazione file non riuscita: " + e.javaClass.simpleName)
+                }
+            }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) { importInProgress = false; return@runOnUiThread }
+                val knownKeys = channels.asSequence()
+                    .map { it.name.lowercase(Locale.ROOT) + "|" + it.url }
+                    .toHashSet()
+                var added = 0
+                var duplicates = 0
+                parsedFiles.forEach { (_, _, found) ->
+                    restoreChannelCategories(found)
+                    if (destination != null) {
+                        found.forEach { it.category = destination }
+                        if (destination !in categories) categories.add(destination)
+                    } else {
+                        found.forEach { channel ->
+                            val savedManualPath = normalizeCategoryPath(channel.category)
+                            val inferred = inferCategoryPath(channel)
+                            channel.category = if (savedManualPath.contains(" > ") && savedManualPath in categories) savedManualPath else inferred
+                            if (channel.category !in categories) categories.add(channel.category)
+                        }
+                    }
+                    found.forEach { channel ->
+                        if (!knownKeys.add(channel.name.lowercase(Locale.ROOT) + "|" + channel.url)) duplicates++
                         else {
-                            ch.selected = !(ch.name.contains("sky", true) && (ch.name.contains("plus", true) || ch.name.contains("+1")))
-                            channels.add(ch)
-                            if (ch.category !in categories) categories.add(ch.category)
+                            channel.selected = !(channel.name.contains("sky", true) && (channel.name.contains("plus", true) || channel.name.contains("+1")))
+                            channels.add(channel)
+                            if (channel.category !in categories) categories.add(channel.category)
                             added++
                         }
                     }
                 }
-            } catch (_: Exception) { invalid++ }
-        }
-        pendingImportCategory = null
-        renderChannels()
-        renderSavedPlaylists()
-        status.text = "File analizzati: ${uris.size} · Nuovi canali: $added · Duplicati ignorati: $duplicates · File senza canali validi: $invalid"
+                pendingImportCategory = null
+                importInProgress = false
+                finishImportProgress()
+                renderChannels()
+                renderSavedPlaylists()
+                status.text = "File analizzati: ${uris.size} · Nuovi canali: $added · Duplicati ignorati: $duplicates · File senza canali validi: $invalid"
+            }
+        }.start()
     }
 
     private fun queryDisplayName(uri: Uri): String {
@@ -1335,33 +1360,56 @@ class MainActivity : FragmentActivity() {
     }
 
     private fun loadSavedPlaylist(file: java.io.File) {
-        try {
-            if (!file.exists()) {
-                toast("La playlist salvata non è più disponibile.")
-                renderSavedPlaylists()
-                return
-            }
-            val found = parseChannels(file.readText(StandardCharsets.UTF_8))
-            restoreChannelCategories(found)
-            if (found.isEmpty()) {
-                toast("Nessun canale valido trovato nel file salvato.")
-                return
-            }
-            var added = 0
-            var duplicates = 0
-            found.forEach { ch ->
-                if (channels.any { it.name.equals(ch.name, true) && it.url == ch.url }) duplicates++
-                else {
-                    ch.selected = !(ch.name.contains("sky", true) && (ch.name.contains("plus", true) || ch.name.contains("+1")))
-                    channels.add(ch)
-                    added++
+        if (importInProgress) { toast("È già in corso un'importazione."); return }
+        if (!file.exists()) {
+            toast("La playlist salvata non è più disponibile.")
+            renderSavedPlaylists()
+            return
+        }
+        importInProgress = true
+        updateImportProgress("Caricamento playlist salvata · lettura file…", null)
+        Thread {
+            try {
+                val found = parseChannels(file.readText(StandardCharsets.UTF_8)) { parsed ->
+                    updateImportProgress("Analisi playlist salvata · $parsed%", parsed)
+                }
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) { importInProgress = false; return@runOnUiThread }
+                    if (found.isEmpty()) {
+                        status.text = "Nessun canale valido trovato nel file salvato."
+                        toast(status.text.toString())
+                    } else {
+                        restoreChannelCategories(found)
+                        val knownKeys = channels.asSequence().map { it.name.lowercase(Locale.ROOT) + "|" + it.url }.toHashSet()
+                        var added = 0
+                        var duplicates = 0
+                        found.forEachIndexed { index, channel ->
+                            if (index % 250 == 0) updateImportProgress("Inserimento canali · ${index + 1} / ${found.size}", 90 + index * 10 / found.size.coerceAtLeast(1))
+                            if (!knownKeys.add(channel.name.lowercase(Locale.ROOT) + "|" + channel.url)) duplicates++
+                            else {
+                                channel.selected = !(channel.name.contains("sky", true) && (channel.name.contains("plus", true) || channel.name.contains("+1")))
+                                channels.add(channel)
+                                if (channel.category !in categories) categories.add(channel.category)
+                                added++
+                            }
+                        }
+                        status.text = "Playlist caricata: ${file.name.substringAfter('_')} · Nuovi canali: $added · Duplicati ignorati: $duplicates"
+                        renderChannels()
+                    }
+                    importInProgress = false
+                    finishImportProgress()
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    importInProgress = false
+                    finishImportProgress()
+                    if (!isFinishing && !isDestroyed) {
+                        status.text = "Impossibile caricare la playlist: ${e.message}"
+                        toast(status.text.toString())
+                    }
                 }
             }
-            renderChannels()
-            status.text = "Playlist caricata: ${file.name.substringAfter('_')} · Nuovi canali: $added · Duplicati ignorati: $duplicates"
-        } catch (e: Exception) {
-            toast("Impossibile caricare la playlist: ${e.message}")
-        }
+        }.start()
     }
 
     private fun confirmClearSavedPlaylists() {
@@ -1389,7 +1437,7 @@ class MainActivity : FragmentActivity() {
     }
 
     // Evita di caricare file arbitrariamente grandi in memoria durante l'importazione.
-    private fun readImportBytes(uri: Uri): ByteArray {
+    private fun readImportBytes(uri: Uri, onProgress: ((Long) -> Unit)? = null): ByteArray {
         val maxBytes = 64L * 1024L * 1024L
         val input = contentResolver.openInputStream(uri)
             ?: throw IOException("Impossibile aprire il file selezionato.")
@@ -1405,6 +1453,7 @@ class MainActivity : FragmentActivity() {
                     throw IOException("Il file supera il limite di importazione di 64 MB.")
                 }
                 output.write(buffer, 0, count)
+                if (total % (512 * 1024) < count) onProgress?.invoke(total)
             }
             return output.toByteArray()
         }
