@@ -6,6 +6,7 @@ const kotlin = readFileSync('android/app/src/main/java/it/davidealpegiani/skyuno
 const lite = readFileSync('android/playerlite/src/main/java/it/davidealpegiani/skylite/MainActivity.kt', 'utf8');
 const liteGradle = readFileSync('android/playerlite/build.gradle.kts', 'utf8');
 const liteUpdater = readFileSync('android/playerlite/src/main/java/it/davidealpegiani/skylite/DavixUpdater.kt', 'utf8');
+const extractorUpdater = readFileSync('android/app/src/main/java/it/davidealpegiani/skyunoextractor/DavixUpdater.kt', 'utf8');
 const extractorKotlin = readFileSync('android/app/src/main/java/it/davidealpegiani/skyunoextractor/MainActivity.kt', 'utf8');
 const epgManager = readFileSync('android/playerlite/src/main/java/it/davidealpegiani/skylite/EpgGuideManager.kt', 'utf8');
 const playerCloudSync = readFileSync('android/playerlite/src/main/java/it/davidealpegiani/skylite/PlayerCloudSync.kt', 'utf8');

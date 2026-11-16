@@ -75,9 +75,10 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
 
     fun check(activity: Activity) {
         activeActivity = activity
+        // Se un download precedente è terminato mentre DAVIX era chiuso,
+        // riprende qui la procedura di installazione Android.
         resumePendingInstall(activity)
-        if (checkedThisProcess) return
-        checkedThisProcess = true
+
         activeDownloadId = prefs.getLong("pending_download_id", -1L)
         if (!receiverRegistered) {
             val filter = IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE)
@@ -85,6 +86,13 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
             else @Suppress("DEPRECATION") app.registerReceiver(downloadReceiver, filter)
             receiverRegistered = true
         }
+
+        // Controllo ad ogni ritorno in primo piano, con intervallo minimo di 6 ore.
+        val now = System.currentTimeMillis()
+        val lastCheck = prefs.getLong("last_version_check_at", 0L)
+        if (now - lastCheck < CHECK_INTERVAL_MS || hasPendingDownload()) return
+        prefs.edit().putLong("last_version_check_at", now).apply()
+
         executor.execute {
             try {
                 val connection = (URL(MANIFEST_URL).openConnection() as HttpURLConnection).apply {
@@ -99,6 +107,8 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
                 val latestCode = item.getLong("versionCode")
                 val latestName = item.getString("versionName")
                 val apkUrl = item.getString("apkUrl")
+                require(Uri.parse(apkUrl).scheme == "https") { "URL APK non sicuro" }
+
                 val currentCode = if (Build.VERSION.SDK_INT >= 28) {
                     app.packageManager.getPackageInfo(app.packageName, 0).longVersionCode
                 } else {
@@ -108,18 +118,49 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
                 if (latestCode > currentCode) {
                     main.post {
                         val current = activeActivity ?: return@post
-                        if (current.isFinishing || current.isDestroyed) return@post
-                        AlertDialog.Builder(current)
-                            .setTitle("Aggiornamento DAVIX disponibile")
-                            .setMessage("È disponibile la versione $latestName.\nVersione installata: ${app.packageManager.getPackageInfo(app.packageName, 0).versionName}.\n\nVuoi scaricarla e avviare l'installazione?")
-                            .setNegativeButton("Più tardi", null)
-                            .setPositiveButton("Aggiorna") { _, _ -> downloadUpdate(current, latestName, apkUrl) }
-                            .show()
+                        if (!activityResumed || current.isFinishing || current.isDestroyed) return@post
+                        // Il pacchetto viene scaricato automaticamente. Android mostrerà
+                        // comunque la propria schermata di conferma per l'installazione.
+                        Toast.makeText(
+                            current,
+                            "DAVIX $latestName disponibile: download automatico avviato",
+                            Toast.LENGTH_LONG
+                        ).show()
+                        downloadUpdate(current, latestName, apkUrl)
                     }
                 }
             } catch (_: Exception) {
                 // Il controllo aggiornamenti è non bloccante: DAVIX resta utilizzabile offline.
+                // In caso di errore riproverà al prossimo controllo utile.
+                prefs.edit().putLong("last_version_check_at", 0L).apply()
             }
+        }
+    }
+
+    private fun hasPendingDownload(): Boolean {
+        val id = prefs.getLong("pending_download_id", -1L)
+        if (id <= 0L) return false
+        return try {
+            val manager = app.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+            manager.query(DownloadManager.Query().setFilterById(id)).use { cursor ->
+                if (!cursor.moveToFirst()) return@use false
+                when (cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))) {
+                    DownloadManager.STATUS_PENDING,
+                    DownloadManager.STATUS_RUNNING,
+                    DownloadManager.STATUS_PAUSED,
+                    DownloadManager.STATUS_SUCCESSFUL -> true
+                    else -> {
+                        prefs.edit()
+                            .remove("pending_download_id")
+                            .remove("pending_apk_path")
+                            .putLong("last_version_check_at", 0L)
+                            .apply()
+                        false
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            false
         }
     }
 
@@ -253,6 +294,7 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
     }
 
     companion object {
+        private const val CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000L
         private const val MANIFEST_URL = "https://github.com/davidealpegiani-82/sky-uno-extractor/releases/download/player-lite-latest/version.json"
     }
 }
