@@ -76,6 +76,8 @@ class MainActivity : FragmentActivity() {
     // Selezione multipla separata dalla selezione di esportazione.
     private var bulkSelectionMode = false
     private val bulkSelectedIndices = mutableSetOf<Int>()
+    // Limita le View create contemporaneamente per ogni cartella: le playlist IPTV possono contenere migliaia di righe.
+    private val folderPageSizes = mutableMapOf<String, Int>()
     // Le cartelle sono chiuse per impostazione predefinita: niente liste chilometriche.
     private val expandedCategoryPaths = mutableSetOf<String>()
     // null = conserva i group-title originali della playlist.
@@ -140,6 +142,7 @@ class MainActivity : FragmentActivity() {
         private const val BG = 0xFF080B12.toInt()
         private const val PANEL = 0xFF121A29.toInt()
         private const val MUTED = 0xFF9EACC0.toInt()
+        private const val CHANNELS_PER_FOLDER_PAGE = 100
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -1579,6 +1582,19 @@ class MainActivity : FragmentActivity() {
         otherList.removeAllViews()
         val selected = channels.withIndex().filter { it.value.selected }
         val others = channels.withIndex().filter { !it.value.selected }
+        // Costruisce una sola mappa degli indici per cartella e antenati.
+        // Evita la precedente scansione completa di channels per ogni singola cartella.
+        val bulkIndicesByPath = mutableMapOf<String, MutableList<Int>>()
+        if (bulkSelectionMode) {
+            channels.forEachIndexed { index, channel ->
+                val parts = normalizeCategoryPath(channel.category).split(" > ").filter { it.isNotBlank() }
+                var path = ""
+                parts.forEach { part ->
+                    path = if (path.isBlank()) part else "$path > $part"
+                    bulkIndicesByPath.getOrPut(path) { mutableListOf() }.add(index)
+                }
+            }
+        }
         selectedHeading.visibility = if (selected.isEmpty()) View.GONE else View.VISIBLE
         otherHeading.visibility = if (others.isEmpty()) View.GONE else View.VISIBLE
 
@@ -1666,11 +1682,7 @@ class MainActivity : FragmentActivity() {
                 if (bulkSelectionMode) {
                     // La selezione della cartella comprende anche tutte le sue
                     // sottocartelle, senza toccare le altre categorie.
-                    val folderIndices = channels.indices.filter { index ->
-                        val channelPath = normalizeCategoryPath(channels[index].category)
-                        channelPath.equals(path, ignoreCase = true) ||
-                            channelPath.startsWith("$path > ", ignoreCase = true)
-                    }
+                    val folderIndices = bulkIndicesByPath[path].orEmpty()
                     val allFolderSelected = folderIndices.isNotEmpty() &&
                         folderIndices.all { it in bulkSelectedIndices }
                     header.addView(buttonView(
@@ -1691,12 +1703,22 @@ class MainActivity : FragmentActivity() {
                     topMargin = dp(4)
                 })
                 if (expanded) {
-                    entries.forEach { entry ->
+                    val visibleLimit = (folderPageSizes[key] ?: CHANNELS_PER_FOLDER_PAGE).coerceAtLeast(CHANNELS_PER_FOLDER_PAGE)
+                    entries.take(visibleLimit).forEach { entry ->
                         val holder = LinearLayout(this).apply {
                             setPadding(dp(10), 0, 0, 0)
                         }
                         addChannelRow(entry.index, entry.value, holder)
                         target.addView(holder, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+                    }
+                    if (entries.size > visibleLimit) {
+                        val remaining = entries.size - visibleLimit
+                        target.addView(buttonView("Mostra altri ${minOf(CHANNELS_PER_FOLDER_PAGE, remaining)} · $remaining rimanenti") {
+                            folderPageSizes[key] = visibleLimit + CHANNELS_PER_FOLDER_PAGE
+                            renderChannels()
+                        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(42)).apply {
+                            bottomMargin = dp(6)
+                        })
                     }
                 }
             }
