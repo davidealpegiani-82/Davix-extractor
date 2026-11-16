@@ -26,6 +26,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
+import androidx.media3.session.MediaSession
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.HttpDataSource
@@ -47,6 +48,7 @@ private data class CloudChannel(val name: String, val url: String, val logo: Str
 @UnstableApi
 class MainActivity : Activity() {
     private var player: ExoPlayer? = null
+    private var mediaSession: MediaSession? = null
     private var resumeAfterBackground = false
     private lateinit var playerView: PlayerView
     private lateinit var titleView: TextView
@@ -719,17 +721,26 @@ class MainActivity : Activity() {
 
     private fun updateStickyCategoryHeader() {
         val activeKey = expandedCategoryPaths.lastOrNull()
-        val title = when {
-            activeKey == null -> "I TUOI CANALI"
-            activeKey == "special:favorites" -> "★ PREFERITI"
-            activeKey == "special:uncategorized" -> "DA CLASSIFICARE"
-            activeKey.startsWith("category:") -> activeKey.removePrefix("category:").uppercase()
-            else -> "I TUOI CANALI"
+        val (title, count) = when {
+            activeKey == null -> "I TUOI CANALI" to cloudChannels.size
+            activeKey == "special:favorites" -> "★ PREFERITI" to cloudChannels.count { it.url in favoriteUrls }
+            activeKey == "special:uncategorized" -> {
+                val categorized = cloudChannels.count {
+                    it.url !in favoriteUrls && it.category.isNotBlank() && !it.category.equals("Non classificati", true)
+                }
+                "DA CLASSIFICARE" to (cloudChannels.size - favoriteUrls.count { url -> cloudChannels.any { it.url == url } } - categorized).coerceAtLeast(0)
+            }
+            activeKey.startsWith("category:") -> {
+                val category = activeKey.removePrefix("category:")
+                category.uppercase() to cloudChannels.count { it.category.trim().equals(category, true) }
+            }
+            else -> "I TUOI CANALI" to cloudChannels.size
         }
-        if (::channelsHeaderView.isInitialized) channelsHeaderView.text = title
+        val stickyLabel = "$title    ·  $count"
+        if (::channelsHeaderView.isInitialized) channelsHeaderView.text = stickyLabel
         if (::fullscreenDrawerHeader.isInitialized) {
-            fullscreenDrawerHeader.text = "  $title  ·  SELEZIONA"
-            fullscreenDrawerHeader.contentDescription = "Elenco $title. Premi per chiudere"
+            fullscreenDrawerHeader.text = "  $stickyLabel  ·  SELEZIONA"
+            fullscreenDrawerHeader.contentDescription = "Elenco $title, $count canali. Premi per chiudere"
         }
     }
 
@@ -1602,6 +1613,8 @@ class MainActivity : Activity() {
                     }
                 })
             }
+        mediaSession?.release()
+        mediaSession = player?.let { MediaSession.Builder(this, it).build() }
     }
 
     override fun onNewIntent(intent: android.content.Intent) {
@@ -1724,6 +1737,8 @@ class MainActivity : Activity() {
         retryHandler.removeCallbacksAndMessages(null)
         cloudHandler.removeCallbacksAndMessages(null)
         cloudExecutor.shutdownNow()
+        mediaSession?.release()
+        mediaSession = null
         playerView.player = null
         player?.release()
         player = null
