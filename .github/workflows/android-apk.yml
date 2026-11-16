@@ -94,7 +94,8 @@ jobs:
           next_name = ".".join(parts)
           print(f"DAVIX_EXTRACTOR_VERSION_CODE={next_code}")
           print(f"DAVIX_EXTRACTOR_VERSION_NAME={next_name}")
-          print(f"Next DAVIX Extractor version: {next_name} ({next_code})")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write(f"Next DAVIX Extractor version: **{next_name} ({next_code})**\\n")
           PY
       - name: Build both APKs
         working-directory: android
