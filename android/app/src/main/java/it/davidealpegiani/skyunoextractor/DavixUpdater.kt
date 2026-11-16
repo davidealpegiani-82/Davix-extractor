@@ -88,7 +88,7 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
             receiverRegistered = true
         }
 
-        // Controllo ad ogni ritorno in primo piano, con intervallo minimo di 6 ore.
+        // Controllo ad ogni ritorno in primo piano, con intervallo minimo di 30 minuti.
         val now = System.currentTimeMillis()
         val lastCheck = prefs.getLong("last_version_check_at", 0L)
         if (now - lastCheck < CHECK_INTERVAL_MS || hasPendingDownload()) return
