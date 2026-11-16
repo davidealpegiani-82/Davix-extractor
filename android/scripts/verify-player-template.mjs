@@ -90,6 +90,9 @@ assert.match(lite, /setTargetBufferBytes\(96 \* 1024 \* 1024\)/, 'Player Lite mu
 assert.match(lite, /setPrioritizeTimeOverSizeThresholds\(false\)/, 'Player Lite must respect its memory target instead of buffering time without a size limit');
 assert.match(lite, /DefaultRenderersFactory\(this\)\.setEnableDecoderFallback\(true\)/, 'Player Lite must allow Media3 to fall back when a hardware decoder fails');
 assert.match(lite, /terminalPlaybackFailure/, 'terminal playback errors must suppress the idle watchdog retry loop');
+assert.match(lite, /terminalPlaybackFailure\) \{[\s\S]*?return\n        \}/, 'terminal errors must stop the periodic STATE_IDLE watchdog');
+assert.match(lite, /retryAfterDelayMs\(response: HttpDataSource\.InvalidResponseCodeException\)/, 'HTTP Retry-After must be respected when a source rate-limits requests');
+assert.match(lite, /maxOf\(localDelay, lastServerRetryAfterMs\)/, 'server retry hints must override shorter local backoff delays');
 assert.match(lite, /recordPlaybackDiagnostic\(/, 'Player Lite must retain a local playback diagnostic history');
 assert.match(lite, /setOnLongClickListener/, 'playback diagnostics must be accessible from the existing diagnostics panel');
 assert.match(lite, /setTargetLiveOffsetIncrementOnRebufferMs\(15_000\)/);
