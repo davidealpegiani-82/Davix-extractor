@@ -15,6 +15,9 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.widget.Toast
+import android.widget.LinearLayout
+import android.widget.ProgressBar
+import android.widget.TextView
 import androidx.core.content.FileProvider
 import org.json.JSONObject
 import java.io.File
@@ -31,8 +34,11 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
     private var activeDownloadId = -1L
     private var receiverRegistered = false
     private var checkedThisProcess = false
-
     private var activityResumed = false
+    private var downloadDialog: AlertDialog? = null
+    private var downloadProgress: ProgressBar? = null
+    private var downloadStatus: TextView? = null
+    private var progressRunnable: Runnable? = null
 
     private val downloadReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -46,16 +52,21 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
                 if (status == DownloadManager.STATUS_SUCCESSFUL) {
                     prefs.edit().putBoolean("download_completed", true).apply()
                     main.post {
+                        stopProgressPolling()
                         val current = activeActivity
                         if (activityResumed && current != null && !current.isFinishing && !current.isDestroyed) {
-                            resumePendingInstall(current)
+                            showInstallReadyDialog(current)
                         }
                     }
                 } else {
                     main.post {
+                        stopProgressPolling()
+                        dismissDownloadDialog()
                         val current = activeActivity
                         if (activityResumed && current != null && !current.isFinishing && !current.isDestroyed) {
-                            Toast.makeText(current, "Download aggiornamento non riuscito", Toast.LENGTH_LONG).show()
+                            AlertDialog.Builder(current).setTitle("Download non riuscito")
+                                .setMessage("Non è stato possibile scaricare l'aggiornamento. Controlla la connessione e riprova.")
+                                .setPositiveButton("OK", null).show()
                         }
                     }
                 }
@@ -258,40 +269,164 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
             val id = manager.enqueue(request)
             activeDownloadId = id
             val destination = File(app.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), fileName)
-            prefs.edit()
-                .putLong("pending_download_id", id)
+            prefs.edit().putLong("pending_download_id", id)
                 .putString("pending_apk_path", destination.absolutePath)
                 .putLong("pending_version_code", versionCode)
                 .putBoolean("installer_launched", false)
-                .apply()
-            Toast.makeText(activity, "Download aggiornamento avviato", Toast.LENGTH_SHORT).show()
+                .putBoolean("download_completed", false).apply()
+            showDownloadProgress(activity, id, versionName)
         } catch (_: Exception) {
-            Toast.makeText(activity, "Impossibile avviare il download", Toast.LENGTH_LONG).show()
+            AlertDialog.Builder(activity).setTitle("Download non avviato")
+                .setMessage("Non è stato possibile avviare il download dell'aggiornamento. Riprova.")
+                .setPositiveButton("OK", null).show()
         }
+    }
+
+    private fun showDownloadProgress(activity: Activity, downloadId: Long, versionName: String) {
+        if (activity.isFinishing || activity.isDestroyed) return
+        dismissDownloadDialog()
+        val layout = LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(activity, 24), dp(activity, 12), dp(activity, 24), dp(activity, 8))
+        }
+        downloadStatus = TextView(activity).apply {
+            text = "Connessione al server…"
+            textSize = 14f
+        }
+        downloadProgress = ProgressBar(activity, null, android.R.attr.progressBarStyleHorizontal).apply {
+            isIndeterminate = true
+            max = 100
+        }
+        layout.addView(downloadStatus)
+        layout.addView(downloadProgress, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, dp(activity, 12)
+        ).apply { topMargin = dp(activity, 16) })
+        downloadDialog = AlertDialog.Builder(activity).setTitle("Download DAVIX $versionName")
+            .setView(layout).setNegativeButton("Nascondi", null).setCancelable(false).create()
+        downloadDialog?.show()
+        startProgressPolling(downloadId)
+    }
+
+    private fun startProgressPolling(downloadId: Long) {
+        stopProgressPolling()
+        val task = object : Runnable {
+            override fun run() {
+                val manager = app.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+                try {
+                    manager.query(DownloadManager.Query().setFilterById(downloadId)).use { cursor ->
+                        if (!cursor.moveToFirst()) return
+                        val status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+                        val downloaded = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR))
+                        val total = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES))
+                        when (status) {
+                            DownloadManager.STATUS_PENDING -> {
+                                downloadStatus?.text = "In attesa di avvio del download…"
+                                downloadProgress?.isIndeterminate = true
+                            }
+                            DownloadManager.STATUS_RUNNING -> {
+                                if (total > 0L) {
+                                    val percent = ((downloaded * 100L) / total).toInt().coerceIn(0, 100)
+                                    downloadProgress?.isIndeterminate = false
+                                    downloadProgress?.progress = percent
+                                    downloadStatus?.text = "Scaricamento… " + percent + "%  ·  " + formatBytes(downloaded) + " / " + formatBytes(total)
+                                } else {
+                                    downloadProgress?.isIndeterminate = true
+                                    downloadStatus?.text = "Scaricamento… " + formatBytes(downloaded)
+                                }
+                            }
+                            DownloadManager.STATUS_PAUSED -> {
+                                downloadProgress?.isIndeterminate = true
+                                downloadStatus?.text = "Download in pausa. Android riproverà automaticamente."
+                            }
+                            DownloadManager.STATUS_SUCCESSFUL -> {
+                                stopProgressPolling()
+                                prefs.edit().putBoolean("download_completed", true).apply()
+                                main.post {
+                                    val current = activeActivity
+                                    if (activityResumed && current != null && !current.isFinishing && !current.isDestroyed) showInstallReadyDialog(current)
+                                }
+                                return
+                            }
+                            DownloadManager.STATUS_FAILED -> {
+                                stopProgressPolling()
+                                main.post {
+                                    dismissDownloadDialog()
+                                    val current = activeActivity
+                                    if (current != null && !current.isFinishing && !current.isDestroyed) {
+                                        AlertDialog.Builder(current).setTitle("Download non riuscito")
+                                            .setMessage("Il download dell'APK non è riuscito. Controlla la connessione e riprova.")
+                                            .setPositiveButton("OK", null).show()
+                                    }
+                                }
+                                return
+                            }
+                        }
+                    }
+                } catch (_: Exception) {
+                    downloadStatus?.text = "Verifica dello stato del download…"
+                }
+                main.postDelayed(this, 400L)
+            }
+        }
+        progressRunnable = task
+        main.post(task)
+    }
+
+    private fun stopProgressPolling() {
+        progressRunnable?.let { main.removeCallbacks(it) }
+        progressRunnable = null
+    }
+
+    private fun dismissDownloadDialog() {
+        stopProgressPolling()
+        downloadDialog?.dismiss()
+        downloadDialog = null
+        downloadProgress = null
+        downloadStatus = null
+    }
+
+    private fun showInstallReadyDialog(activity: Activity) {
+        if (activity.isFinishing || activity.isDestroyed || prefs.getBoolean("installer_launched", false)) return
+        dismissDownloadDialog()
+        AlertDialog.Builder(activity).setTitle("Download completato")
+            .setMessage("L'APK di DAVIX è stato scaricato correttamente. Vuoi procedere con l'aggiornamento?")
+            .setNegativeButton("Più tardi", null)
+            .setPositiveButton("Installa aggiornamento") { _, _ ->
+                val path = prefs.getString("pending_apk_path", null) ?: return@setPositiveButton
+                val file = File(path)
+                if (file.exists() && file.length() > 0L) installOrRequestPermission(activity, file)
+                else AlertDialog.Builder(activity).setMessage("Il file APK non è disponibile. Avvia nuovamente il download.")
+                    .setPositiveButton("OK", null).show()
+            }.show()
     }
 
     private fun resumePendingInstall(activity: Activity) {
         if (prefs.getBoolean("installer_launched", false)) return
-        val path = prefs.getString("pending_apk_path", null) ?: return
         val id = prefs.getLong("pending_download_id", -1L)
-        if (id > 0L) {
-            val manager = app.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-            manager.query(DownloadManager.Query().setFilterById(id)).use { cursor ->
-                if (!cursor.moveToFirst()) return
-                if (cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)) != DownloadManager.STATUS_SUCCESSFUL) return
+        if (id <= 0L) return
+        val manager = app.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+        manager.query(DownloadManager.Query().setFilterById(id)).use { cursor ->
+            if (!cursor.moveToFirst()) return
+            when (cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))) {
+                DownloadManager.STATUS_PENDING, DownloadManager.STATUS_RUNNING, DownloadManager.STATUS_PAUSED ->
+                    showDownloadProgress(activity, id, "in corso")
+                DownloadManager.STATUS_SUCCESSFUL -> {
+                    prefs.edit().putBoolean("download_completed", true).apply()
+                    showInstallReadyDialog(activity)
+                }
+                else -> prefs.edit().remove("pending_download_id").remove("pending_apk_path").apply()
             }
         }
-        val file = File(path)
-        val waitingForPermission = prefs.getBoolean("awaiting_install_permission", false)
-        val canInstall = Build.VERSION.SDK_INT < 26 || activity.packageManager.canRequestPackageInstalls()
-        if (waitingForPermission) {
-            prefs.edit().putBoolean("awaiting_install_permission", false).apply()
-            if (!canInstall) {
-                Toast.makeText(activity, "Per installare l'aggiornamento, consenti a DAVIX di installare app da questa origine e torna qui.", Toast.LENGTH_LONG).show()
-                return
-            }
-        }
-        if (file.exists() && file.length() > 0L) installOrRequestPermission(activity, file)
+    }
+
+    private fun dp(context: Context, value: Int): Int =
+        (value * context.resources.displayMetrics.density).toInt()
+
+    private fun formatBytes(bytes: Long): String {
+        if (bytes < 1024L) return bytes.toString() + " B"
+        val kb = bytes / 1024.0
+        if (kb < 1024.0) return String.format(java.util.Locale.ITALY, "%.0f KB", kb)
+        return String.format(java.util.Locale.ITALY, "%.1f MB", kb / 1024.0)
     }
 
     private fun installOrRequestPermission(activity: Activity, file: File) {
