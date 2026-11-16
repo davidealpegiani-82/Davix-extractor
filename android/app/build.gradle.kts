@@ -9,6 +9,11 @@ val davixKeyAlias = System.getenv("DAVIX_SIGNING_KEY_ALIAS")
 val davixKeyPassword = System.getenv("DAVIX_SIGNING_KEY_PASSWORD")
 val hasDavixSigning = listOf(davixStoreFile, davixStorePassword, davixKeyAlias, davixKeyPassword).all { !it.isNullOrBlank() }
 
+// CI supplies monotonically increasing values from the last successfully published manifest.
+// Local builds retain the latest checked-in fallback version.
+val extractorVersionCode = System.getenv("DAVIX_EXTRACTOR_VERSION_CODE")?.toIntOrNull() ?: 15
+val extractorVersionName = System.getenv("DAVIX_EXTRACTOR_VERSION_NAME") ?: "1.4.7"
+
 
 android {
     namespace = "it.davidealpegiani.skyunoextractor"
@@ -18,8 +23,8 @@ android {
         applicationId = "it.davidealpegiani.skyunoextractor"
         minSdk = 24
         targetSdk = 35
-        versionCode = 15
-        versionName = "1.4.7"
+        versionCode = extractorVersionCode
+        versionName = extractorVersionName
     }
 
     signingConfigs {
