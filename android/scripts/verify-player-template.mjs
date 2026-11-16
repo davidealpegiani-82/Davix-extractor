@@ -4,6 +4,7 @@ import { Script } from 'node:vm';
 const template = readFileSync('android/app/src/main/assets/player-template.html', 'utf8');
 const kotlin = readFileSync('android/app/src/main/java/it/davidealpegiani/skyunoextractor/MainActivity.kt', 'utf8');
 const lite = readFileSync('android/playerlite/src/main/java/it/davidealpegiani/skylite/MainActivity.kt', 'utf8');
+const liteGradle = readFileSync('android/playerlite/build.gradle.kts', 'utf8');
 const extractorKotlin = readFileSync('android/app/src/main/java/it/davidealpegiani/skyunoextractor/MainActivity.kt', 'utf8');
 const epgManager = readFileSync('android/playerlite/src/main/java/it/davidealpegiani/skylite/EpgGuideManager.kt', 'utf8');
 const playerCloudSync = readFileSync('android/playerlite/src/main/java/it/davidealpegiani/skylite/PlayerCloudSync.kt', 'utf8');
@@ -203,3 +204,8 @@ assert.match(playerCloudSync, /remove\("epgSourceUrl"\)/, 'Player Lite must not 
 assert.match(lite, /PlayerCloudSync\.customEpgSource\(this\)/, 'Player Lite must use the protected custom XMLTV source');
 assert.match(epgManager, /XMLTV personalizzato/, 'Custom XMLTV must be added as the primary EPG source');
 
+
+assert.match(liteGradle, /androidx\.media3:media3-session:1\.11\.1/, 'Player Lite must include the Media3 session module');
+assert.match(lite, /MediaSession\.Builder\(this, it\)\.build\(\)/, 'Player Lite must expose its active player through a MediaSession');
+assert.match(lite, /mediaSession\?\.release\(\)/, 'Player Lite must release its MediaSession with the player lifecycle');
+assert.match(lite, /val stickyLabel = "\$title\\s+·\\s+\$count"/, 'the fixed category header must show the selected category and channel count');
