@@ -160,6 +160,8 @@ class MainActivity : Activity() {
     private var lastPlaybackProgressAt = 0L
     private var lastObservedPositionMs = C.TIME_UNSET
     private var lastKnownNetworkAvailable: Boolean? = null
+    // Impedisce al watchdog STATE_IDLE di riavviare errori permanenti (404, 401, parsing/decoder).
+    private var terminalPlaybackFailure = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -1118,6 +1120,7 @@ class MainActivity : Activity() {
         titleView.text = channel.name
         statusView.text = "Connessione al flusso…"
         selectedChannelForRecovery = channel
+        terminalPlaybackFailure = false
         bufferingStartedAt = System.currentTimeMillis()
         lastPlaybackProgressAt = bufferingStartedAt
         lastObservedPositionMs = C.TIME_UNSET
@@ -1372,7 +1375,7 @@ class MainActivity : Activity() {
 
     private fun monitorPlaybackHealth(current: ExoPlayer, now: Long, bufferedAheadMs: Long) {
         if (!current.playWhenReady || current.mediaItemCount == 0 ||
-            selectedChannelForRecovery == null || isFinishing || isDestroyed) {
+            selectedChannelForRecovery == null || isFinishing || isDestroyed || terminalPlaybackFailure) {
             bufferingStartedAt = 0L
             lastPlaybackProgressAt = now
             lastObservedPositionMs = current.currentPosition
@@ -1543,6 +1546,7 @@ class MainActivity : Activity() {
             .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(8))
 
         player = ExoPlayer.Builder(this)
+            .setRenderersFactory(androidx.media3.exoplayer.DefaultRenderersFactory(this).setEnableDecoderFallback(true))
             .setLoadControl(loadControl)
             .setLivePlaybackSpeedControl(liveSpeedControl)
             .setMediaSourceFactory(mediaSourceFactory)
@@ -1626,6 +1630,7 @@ class MainActivity : Activity() {
                         }
 
                         if (retryable) {
+                            terminalPlaybackFailure = false
                             bufferingStartedAt = System.currentTimeMillis()
                             val reason = if (httpCode != null) {
                                 "HTTP $httpCode · ${describeHttpStatus(httpCode)}: nuovo tentativo"
@@ -1634,7 +1639,9 @@ class MainActivity : Activity() {
                             }
                             schedulePlaybackRecovery(reason)
                         } else {
-                            statusView.text = "Canale non disponibile (HTTP $httpCode)."
+                            terminalPlaybackFailure = true
+                            val detail = if (httpCode != null) "HTTP $httpCode · ${describeHttpStatus(httpCode)}" else error.errorCodeName
+                            statusView.text = "Riproduzione non recuperabile: $detail. Verifica la sorgente o prova un altro canale."
                             cancelPendingRecovery()
                         }
                     }
@@ -1726,6 +1733,7 @@ class MainActivity : Activity() {
         // Il MIME esplicito evita ambiguità con flussi HLS senza estensione .m3u8.
         cancelPendingRecovery()
         selectedChannelForRecovery = CloudChannel(channelName, streamUrl)
+        terminalPlaybackFailure = false
         lastPlayerError = "nessuno"
         lastHttpStatusCode = null
         lastHlsLoad = "in attesa del primo segmento"
