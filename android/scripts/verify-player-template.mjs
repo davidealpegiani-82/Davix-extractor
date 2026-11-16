@@ -85,8 +85,13 @@ assert.match(kotlin, /HttpDataSource\.InvalidResponseCodeException/, 'Extractor 
 assert.match(kotlin, /playbackRetryCount\.coerceAtMost\(delays\.lastIndex\)/, 'Extractor retry backoff must remain capped without stopping after a fixed number of attempts');
 assert.match(kotlin, /httpStatus == 408 \|\| httpStatus == 425 \|\| httpStatus == 429 \|\| httpStatus in 500\.\.599/, 'Extractor must not retry permanent HTTP client errors');
 assert.match(kotlin, /setBufferDurationsMs\(\s*60_000,[\s\S]*?180_000,[\s\S]*?15_000,[\s\S]*?45_000[\s\S]*?\)/);
-assert.match(lite, /setBufferDurationsMs\(\s*60_000,\s*180_000,\s*15_000,\s*45_000/s, 'Player Lite must use the same load-control profile as Extractor');
-assert.match(lite, /setPrioritizeTimeOverSizeThresholds\(true\)/);
+assert.match(lite, /setBufferDurationsMs\(\s*30_000,\s*90_000,\s*8_000,\s*15_000/s, 'Player Lite must use a bounded live buffer profile');
+assert.match(lite, /setTargetBufferBytes\(96 \* 1024 \* 1024\)/, 'Player Lite must cap the target buffer to limit memory pressure on TV devices');
+assert.match(lite, /setPrioritizeTimeOverSizeThresholds\(false\)/, 'Player Lite must respect its memory target instead of buffering time without a size limit');
+assert.match(lite, /DefaultRenderersFactory\(this\)\.setEnableDecoderFallback\(true\)/, 'Player Lite must allow Media3 to fall back when a hardware decoder fails');
+assert.match(lite, /terminalPlaybackFailure/, 'terminal playback errors must suppress the idle watchdog retry loop');
+assert.match(lite, /recordPlaybackDiagnostic\(/, 'Player Lite must retain a local playback diagnostic history');
+assert.match(lite, /setOnLongClickListener/, 'playback diagnostics must be accessible from the existing diagnostics panel');
 assert.match(lite, /setTargetLiveOffsetIncrementOnRebufferMs\(15_000\)/);
 assert.match(lite, /setMinPlaybackSpeed\(0\.97f\)/);
 assert.match(lite, /setMaxPlaybackSpeed\(1\.04f\)/);
