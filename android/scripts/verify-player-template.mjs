@@ -95,8 +95,8 @@ assert.match(lite, /private fun isRetryableHttpStatus\(code: Int\): Boolean = co
 assert.match(lite, /now - bufferingStartedAt >= 35_000L/, 'buffering watchdog must recover sooner after sustained stalls');
 assert.match(lite, /now - lastPlaybackProgressAt >= 15_000L/, 'ready-but-frozen playback must trigger recovery even when the buffer counter is stale');
 assert.match(lite, /Riproduzione senza avanzamento: riaggancio automatico/, 'Player Lite must detect a frozen READY playback state');
-assert.match(lite, /Player\.STATE_ENDED ->[\\s\\S]*?Il canale ha terminato la trasmissione/, 'a genuinely ended channel must stop retrying');
-assert.match(lite, /Errore \\$\\{error\.errorCodeName\\}: ripristino automatico/, 'non-HTTP playback errors must enter automatic recovery');
+assert.ok(lite.includes('Player.STATE_ENDED ->') && lite.includes('Il canale ha terminato la trasmissione.'), 'a genuinely ended channel must stop retrying');
+assert.ok(lite.includes('Errore ${error.errorCodeName}: ripristino automatico'), 'non-HTTP playback errors must enter automatic recovery');
 
 assert.match(lite, /private fun monitorPlaybackHealth\(/, 'Player Lite must detect stalled playback even without a Media3 error');
 assert.match(lite, /private fun isCurrentAnalyticsEvent\(/, 'Player Lite must reject analytics callbacks from an obsolete channel timeline');
