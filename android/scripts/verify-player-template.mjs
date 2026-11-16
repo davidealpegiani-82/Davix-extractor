@@ -91,6 +91,13 @@ assert.match(lite, /setTargetLiveOffsetIncrementOnRebufferMs\(15_000\)/);
 assert.match(lite, /setMinPlaybackSpeed\(0\.97f\)/);
 assert.match(lite, /setMaxPlaybackSpeed\(1\.04f\)/);
 assert.match(lite, /DefaultLoadErrorHandlingPolicy\(8\)/);
+assert.match(lite, /private fun isRetryableHttpStatus\(code: Int\): Boolean = code != 404 && code != 410/, 'Player Lite must retry temporary HTTP failures including 406 and stop only for removed/closed streams');
+assert.match(lite, /now - bufferingStartedAt >= 35_000L/, 'buffering watchdog must recover sooner after sustained stalls');
+assert.match(lite, /now - lastPlaybackProgressAt >= 15_000L/, 'ready-but-frozen playback must trigger recovery even when the buffer counter is stale');
+assert.match(lite, /Riproduzione senza avanzamento: riaggancio automatico/, 'Player Lite must detect a frozen READY playback state');
+assert.ok(lite.includes('Player.STATE_ENDED ->') && lite.includes('Il canale ha terminato la trasmissione.'), 'a genuinely ended channel must stop retrying');
+assert.ok(lite.includes('Errore ${error.errorCodeName}: ripristino automatico'), 'non-HTTP playback errors must enter automatic recovery');
+
 assert.match(lite, /private fun monitorPlaybackHealth\(/, 'Player Lite must detect stalled playback even without a Media3 error');
 assert.match(lite, /private fun isCurrentAnalyticsEvent\(/, 'Player Lite must reject analytics callbacks from an obsolete channel timeline');
 assert.match(lite, /val wideLayout = tvMode \|\|/, 'Player Lite must use a split layout on TV and landscape phones');

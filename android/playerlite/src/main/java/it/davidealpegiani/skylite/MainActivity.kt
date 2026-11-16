@@ -1234,7 +1234,8 @@ class MainActivity : Activity() {
             if (::channelBrowser.isInitialized) channelBrowser.visibility = View.VISIBLE
             cloudHeaderView.visibility = View.GONE
             channelsHeaderView.visibility = if (PlayerCloudSync.hasValidLease(this)) View.VISIBLE else View.GONE
-            player?.pause()
+            // Uscire dal fullscreen non deve interrompere il flusso: il video
+            // continua nella finestra di anteprima.
             playerContainer.visibility = if (isTvDevice() && selectedChannelForRecovery != null) View.VISIBLE else View.GONE
             if (isTvDevice()) {
                 playerParams.width = 0
@@ -1379,19 +1380,24 @@ class MainActivity : Activity() {
                 if (bufferingStartedAt == 0L) bufferingStartedAt = now
                 // Lascia terminare i timeout HTTP e i retry interni di Media3 prima
                 // di riavviare la playlist dall'ultimo live edge disponibile.
-                if (now - bufferingStartedAt >= 65_000L && bufferedAheadMs < 2_000L) {
+                if (now - bufferingStartedAt >= 35_000L && bufferedAheadMs < 3_000L) {
                     schedulePlaybackRecovery("Buffer esaurito: ripristino automatico")
                 }
             }
             Player.STATE_READY -> {
                 bufferingStartedAt = 0L
-                if (bufferedAheadMs < 2_000L && now - lastPlaybackProgressAt >= 20_000L) {
-                    schedulePlaybackRecovery("Flusso fermo: riaggancio automatico")
+                if (now - lastPlaybackProgressAt >= 15_000L) {
+                    schedulePlaybackRecovery("Riproduzione senza avanzamento: riaggancio automatico")
                 }
             }
-            Player.STATE_ENDED, Player.STATE_IDLE -> {
+            Player.STATE_ENDED -> {
+                // Un live che termina realmente non va riavviato all'infinito.
+                statusView.text = "Il canale ha terminato la trasmissione."
+                cancelPendingRecovery()
+            }
+            Player.STATE_IDLE -> {
                 if (now - lastPlaybackProgressAt >= 5_000L) {
-                    schedulePlaybackRecovery("Flusso terminato o inattivo: riconnessione")
+                    schedulePlaybackRecovery("Player inattivo: riconnessione automatica")
                 }
             }
         }
@@ -1446,8 +1452,10 @@ class MainActivity : Activity() {
         else -> "risposta HTTP non valida"
     }
 
-    private fun isRetryableHttpStatus(code: Int): Boolean =
-        code == 408 || code == 425 || code == 429 || code in 500..599
+    // 404/410 sono gli unici status HTTP che trattiamo come flusso rimosso/chiuso.
+    // Tutti gli altri (inclusi 401/403/406/429 e 5xx) vengono ritentati:
+    // CDN e provider possono applicare blocchi o rate-limit temporanei.
+    private fun isRetryableHttpStatus(code: Int): Boolean = code != 404 && code != 410
 
     /**
      * Scarta gli eventi Analytics appartenenti a una timeline/canale precedente.
@@ -1572,9 +1580,10 @@ class MainActivity : Activity() {
                             isRetryableHttpStatus(httpCode)
                         } else {
                             lastPlayerError = error.errorCodeName
-                            error.errorCodeName.contains("IO_") ||
-                                error.errorCodeName.contains("TIMEOUT") ||
-                                error.errorCodeName.contains("BEHIND_LIVE_WINDOW")
+                            // Anche errori IO, timeout, live-window e risposte malformate
+                            // possono essere transitori: il retry è persistente e limitato
+                            // nel ritmo, non nel numero di tentativi.
+                            true
                         }
 
                         if (retryable) {
@@ -1582,15 +1591,12 @@ class MainActivity : Activity() {
                             val reason = if (httpCode != null) {
                                 "HTTP $httpCode · ${describeHttpStatus(httpCode)}: nuovo tentativo"
                             } else {
-                                "Errore ${error.errorCodeName}: ripristino"
+                                "Errore ${error.errorCodeName}: ripristino automatico"
                             }
                             schedulePlaybackRecovery(reason)
                         } else {
-                            statusView.text = if (httpCode != null) {
-                                "HTTP $httpCode: ${describeHttpStatus(httpCode)}. Seleziona un altro flusso o verifica la sorgente."
-                            } else {
-                                "Errore non recuperabile: ${error.errorCodeName}"
-                            }
+                            statusView.text = "Canale non disponibile (HTTP $httpCode)."
+                            cancelPendingRecovery()
                         }
                     }
 
