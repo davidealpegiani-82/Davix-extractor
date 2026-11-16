@@ -95,7 +95,7 @@ assert.match(kotlin, /streamMimeType\(channel\.url\)/, 'Extractor must not force
 assert.match(kotlin, /HttpDataSource\.InvalidResponseCodeException/, 'Extractor must classify HTTP playback failures');
 assert.match(kotlin, /playbackRetryCount\.coerceAtMost\(delays\.lastIndex\)/, 'Extractor retry backoff must remain capped without stopping after a fixed number of attempts');
 assert.match(kotlin, /httpStatus == 408 \|\| httpStatus == 425 \|\| httpStatus == 429 \|\| httpStatus in 500\.\.599/, 'Extractor must not retry permanent HTTP client errors');
-assert.match(kotlin, /setBufferDurationsMs\(\s*60_000,[\s\S]*?180_000,[\s\S]*?15_000,[\s\S]*?45_000[\s\S]*?\)/);
+assert.match(kotlin, /setBufferDurationsMs\(\s*15_000,[\s\S]*?60_000,[\s\S]*?5_000,[\s\S]*?10_000[\s\S]*?\)/, 'Extractor must use a bounded low-memory live buffer');
 assert.match(lite, /setBufferDurationsMs\(\s*30_000,\s*90_000,\s*8_000,\s*15_000/s, 'Player Lite must use a bounded live buffer profile');
 assert.match(lite, /setTargetBufferBytes\(96 \* 1024 \* 1024\)/, 'Player Lite must cap the target buffer to limit memory pressure on TV devices');
 assert.match(lite, /setPrioritizeTimeOverSizeThresholds\(false\)/, 'Player Lite must respect its memory target instead of buffering time without a size limit');
