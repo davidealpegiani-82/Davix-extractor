@@ -294,6 +294,7 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
     }
 
     companion object {
-        private const val CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000L\n        private const val MANIFEST_URL = "https://github.com/davidealpegiani-82/sky-uno-extractor/releases/download/player-lite-latest/version.json"
+        private const val CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000L
+        private const val MANIFEST_URL = "https://github.com/davidealpegiani-82/sky-uno-extractor/releases/download/player-lite-latest/version.json"
     }
 }
