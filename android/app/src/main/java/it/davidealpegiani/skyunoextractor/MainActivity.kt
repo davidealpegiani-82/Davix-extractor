@@ -1344,17 +1344,29 @@ class MainActivity : FragmentActivity() {
             ))
         }
 
-        val lines = text.lines()
-        for (i in lines.indices) {
-            val line = lines[i].trim()
+        // Scansione lineare: cercare la URL con lines.drop(i + 1) per ogni
+        // #EXTINF rendeva il parser quadratico sulle playlist IPTV molto grandi.
+        val lines = text.lineSequence()
+        var pendingName: String? = null
+        var pendingLogo = ""
+        var pendingGroup: String? = null
+        var pendingTvgId = ""
+        var pendingTvgName = ""
+        for (rawLine in lines) {
+            val line = rawLine.trim()
             if (line.startsWith("#EXTINF", true)) {
-                val name = line.substringAfterLast(',').trim()
-                val logo = Regex("tvg-logo=[\"']([^\"']+)").find(line)?.groupValues?.getOrNull(1).orEmpty()
-                val group = Regex("group-title=[\"']([^\"']+)").find(line)?.groupValues?.getOrNull(1)
-                val tvgId = Regex("tvg-id=[\"']([^\"']*)").find(line)?.groupValues?.getOrNull(1).orEmpty()
-                val tvgName = Regex("tvg-name=[\"']([^\"']*)").find(line)?.groupValues?.getOrNull(1).orEmpty()
-                val url = lines.drop(i + 1).firstOrNull { it.trim().isNotEmpty() && !it.trim().startsWith("#") }?.trim()
-                add(name, url, logo, group, tvgId, tvgName)
+                pendingName = line.substringAfterLast(',').trim()
+                pendingLogo = Regex("tvg-logo=[\"']([^\"']+)").find(line)?.groupValues?.getOrNull(1).orEmpty()
+                pendingGroup = Regex("group-title=[\"']([^\"']+)").find(line)?.groupValues?.getOrNull(1)
+                pendingTvgId = Regex("tvg-id=[\"']([^\"']*)").find(line)?.groupValues?.getOrNull(1).orEmpty()
+                pendingTvgName = Regex("tvg-name=[\"']([^\"']*)").find(line)?.groupValues?.getOrNull(1).orEmpty()
+            } else if (pendingName != null && line.isNotEmpty() && !line.startsWith("#")) {
+                add(pendingName, line, pendingLogo, pendingGroup, pendingTvgId, pendingTvgName)
+                pendingName = null
+                pendingLogo = ""
+                pendingGroup = null
+                pendingTvgId = ""
+                pendingTvgName = ""
             }
         }
 
