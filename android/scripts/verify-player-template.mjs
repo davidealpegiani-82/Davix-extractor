@@ -5,6 +5,7 @@ const template = readFileSync('android/app/src/main/assets/player-template.html'
 const kotlin = readFileSync('android/app/src/main/java/it/davidealpegiani/skyunoextractor/MainActivity.kt', 'utf8');
 const lite = readFileSync('android/playerlite/src/main/java/it/davidealpegiani/skylite/MainActivity.kt', 'utf8');
 const liteGradle = readFileSync('android/playerlite/build.gradle.kts', 'utf8');
+const liteUpdater = readFileSync('android/playerlite/src/main/java/it/davidealpegiani/skylite/DavixUpdater.kt', 'utf8');
 const extractorKotlin = readFileSync('android/app/src/main/java/it/davidealpegiani/skyunoextractor/MainActivity.kt', 'utf8');
 const epgManager = readFileSync('android/playerlite/src/main/java/it/davidealpegiani/skylite/EpgGuideManager.kt', 'utf8');
 const playerCloudSync = readFileSync('android/playerlite/src/main/java/it/davidealpegiani/skylite/PlayerCloudSync.kt', 'utf8');
@@ -22,8 +23,12 @@ const playerLiteGradle = readFileSync('android/playerlite/build.gradle.kts', 'ut
 const androidWorkflow = readFileSync('.github/workflows/android-apk.yml', 'utf8');
 assert.match(appGradle, /create\("davixRelease"\)/, 'Extractor must support a stable release signing key');
 assert.match(playerLiteGradle, /create\("davixRelease"\)/, 'Player Lite must support the same stable release signing key');
-assert.match(playerLiteGradle, /versionCode = 11/, 'Player Lite update must increment versionCode for in-place installation');
-assert.match(playerLiteGradle, /versionName = "1\.2\.2"/, 'Player Lite version name must match the release');
+assert.match(playerLiteGradle, /versionCode = 12/, 'Player Lite update must increment versionCode for in-place installation');
+assert.match(playerLiteGradle, /versionName = "1\.2\.3"/, 'Player Lite version name must match the release');
+assert.match(liteUpdater, /CHECK_INTERVAL_MS = 6 \* 60 \* 60 \* 1000L/, 'Player Lite must periodically check for updates');
+assert.match(liteUpdater, /download automatico avviato/, 'Player Lite must automatically download newer APKs');
+assert.match(liteUpdater, /private fun hasPendingDownload\(/, 'Player Lite must avoid duplicate update downloads');
+assert.match(liteUpdater, /Uri\.parse\(apkUrl\)\.scheme == "https"/, 'Player Lite must only download APKs over HTTPS');
 assert.match(androidWorkflow, /DAVIX_KEYSTORE_BASE64/, 'Android build workflow must read the release keystore from a GitHub secret');
 assert.match(androidWorkflow, /github\.event_name != 'pull_request'/, 'Release signing secrets must never be exposed to pull request builds');
 assert.match(androidWorkflow, /assemble\$\{DAVIX_BUILD_TYPE\}/, 'Android build workflow must select signed release or debug build consistently');
