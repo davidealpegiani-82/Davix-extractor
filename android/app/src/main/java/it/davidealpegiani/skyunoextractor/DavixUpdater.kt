@@ -153,7 +153,8 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
     // In quel momento si elimina lo stato del vecchio download, altrimenti il suo
     // STATUS_SUCCESSFUL verrebbe interpretato come download ancora pendente per sempre.
     private fun clearCompletedInstallIfApplied() {
-        if (!prefs.getBoolean("installer_launched", false)) return
+        // La versione installata è la fonte di verità: può essere stata aggiornata
+        // anche se Android ha interrotto DAVIX prima del salvataggio installer_launched.
         val targetCode = prefs.getLong("pending_version_code", -1L)
         if (targetCode <= 0L) return
         val currentCode = runCatching {
@@ -164,6 +165,14 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
             }
         }.getOrDefault(0L)
         if (currentCode >= targetCode) {
+            // Rimuove anche un eventuale DownloadManager ancora in PENDING/RUNNING:
+            // non deve essere riproposto dopo che la versione richiesta è già installata.
+            val staleId = prefs.getLong("pending_download_id", -1L)
+            if (staleId > 0L) {
+                runCatching {
+                    (app.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).remove(staleId)
+                }
+            }
             prefs.edit()
                 .remove("pending_download_id")
                 .remove("pending_apk_path")
@@ -173,6 +182,8 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
                 .putBoolean("awaiting_install_permission", false)
                 .putLong("last_version_check_at", 0L)
                 .apply()
+            activeDownloadId = -1L
+            dismissDownloadDialog()
         }
     }
 
