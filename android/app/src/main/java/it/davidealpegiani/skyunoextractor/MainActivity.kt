@@ -1663,6 +1663,29 @@ class MainActivity : FragmentActivity() {
                     textSize = 12f
                     setTextColor(CYAN)
                 })
+                if (bulkSelectionMode) {
+                    // La selezione della cartella comprende anche tutte le sue
+                    // sottocartelle, senza toccare le altre categorie.
+                    val folderIndices = channels.indices.filter { index ->
+                        val channelPath = normalizeCategoryPath(channels[index].category)
+                        channelPath.equals(path, ignoreCase = true) ||
+                            channelPath.startsWith("$path > ", ignoreCase = true)
+                    }
+                    val allFolderSelected = folderIndices.isNotEmpty() &&
+                        folderIndices.all { it in bulkSelectedIndices }
+                    header.addView(buttonView(
+                        if (allFolderSelected) "Deseleziona" else "Seleziona"
+                    ) {
+                        if (allFolderSelected) {
+                            bulkSelectedIndices.removeAll(folderIndices.toSet())
+                        } else {
+                            bulkSelectedIndices.addAll(folderIndices)
+                        }
+                        renderChannels()
+                    }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)).apply {
+                        leftMargin = dp(8)
+                    })
+                }
                 target.addView(header, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                     bottomMargin = dp(5)
                     topMargin = dp(4)
