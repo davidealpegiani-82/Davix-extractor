@@ -7,6 +7,7 @@ assert.ok(source.includes("private fun importUris(uris: List<Uri>)"), "File impo
 assert.ok(source.includes("val parsedFiles = mutableListOf<List<TvChannel>>()"), "Multi-file import must retain parsed channels only");
 assert.ok(source.includes("parsedFiles.add(found)"), "Parsed channel batches must be retained without source byte arrays");
 assert.ok(source.includes("val batchSize = 200"), "Channel insertion must be split into bounded UI batches");
+assert.equal((source.match(/val batchSize = 200/g) || []).length, 2, "Both file and remote URL imports must use bounded UI batches");
 assert.ok(source.includes("importHandler.postDelayed(this, 1L)"), "Large imports must yield between UI batches");
 assert.ok(source.includes("val knownCategories = categories.toHashSet()"), "Category deduplication must use indexed membership during bulk import");
 assert.ok(!source.includes("mutableListOf<Triple<String, ByteArray, List<TvChannel>>>"), "Do not retain every source file byte array alongside parsed channels");
