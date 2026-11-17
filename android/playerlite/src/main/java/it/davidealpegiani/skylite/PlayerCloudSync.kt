@@ -111,21 +111,42 @@ internal object PlayerCloudSync {
 
     fun sync(context: Context): JSONObject {
         val version = currentVersion(context)
-        val result = request(context, "GET", "/v1/config?sinceVersion=$version", null, authenticated = true)
-        val lease = result.optLong("leaseExpiresAt", 0L)
+        val manifest = request(context, "GET", "/v2/config/manifest?sinceVersion=$version", null, authenticated = true)
+        val lease = manifest.optLong("leaseExpiresAt", 0L)
         require(lease > System.currentTimeMillis()) { "Licenza offline scaduta. Riconnetti il Player." }
-        if (result.optBoolean("unchanged", false)) {
+        if (manifest.optBoolean("unchanged", false)) {
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putLong(LEASE_EXPIRY, lease).apply()
-            return JSONObject().put("unchanged", true).put("version", result.optInt("version", version))
+            return JSONObject().put("unchanged", true).put("version", manifest.optInt("version", version))
         }
-        val config = result.optJSONObject("config")
-            ?: throw IllegalStateException("La configurazione ricevuta non è valida.")
-        val channels = config.optJSONArray("channels")
-            ?: throw IllegalStateException("La lista dei canali non è presente.")
-        val categories = config.optJSONArray("categories")
-        require(channels.length() <= 1000) { "La lista ricevuta supera il limite previsto." }
-        require(categories == null || categories.length() <= 100) { "La configurazione contiene troppe categorie." }
-        if (categories != null) for (index in 0 until categories.length()) {
+
+        val remoteVersion = manifest.optInt("version", 0)
+        val channelCount = manifest.optInt("channelCount", -1)
+        val chunkCount = manifest.optInt("chunkCount", -1)
+        require(remoteVersion > 0 && channelCount in 1..10_000 && chunkCount in 1..125) {
+            "Il manifesto Cloud Sync non è valido o supera il limite di 10.000 canali."
+        }
+        require(chunkCount == (channelCount + 79) / 80) {
+            "Il numero di blocchi ricevuti non corrisponde alla lista dichiarata."
+        }
+
+        val channels = org.json.JSONArray()
+        for (index in 0 until chunkCount) {
+            val part = request(context, "GET", "/v2/config/chunk?version=$remoteVersion&index=$index", null, authenticated = true)
+            require(part.optInt("version", -1) == remoteVersion && part.optInt("index", -1) == index) {
+                "La sincronizzazione è cambiata durante il download. Riprova."
+            }
+            val batch = part.optJSONArray("channels")
+                ?: throw IllegalStateException("Un blocco della lista canali è incompleto.")
+            require(batch.length() in 1..80) { "Un blocco della lista canali non è valido." }
+            for (item in 0 until batch.length()) channels.put(batch.getJSONObject(item))
+        }
+        require(channels.length() == channelCount) {
+            "La lista ricevuta è incompleta: ${channels.length()} di $channelCount canali."
+        }
+
+        val categories = manifest.optJSONArray("categories") ?: org.json.JSONArray()
+        require(categories.length() <= 100) { "La configurazione contiene troppe categorie." }
+        for (index in 0 until categories.length()) {
             val category = categories.optString(index)
             require(category.isNotBlank() && category.length <= 80) { "La configurazione contiene una categoria non valida." }
         }
@@ -139,22 +160,26 @@ internal object PlayerCloudSync {
         }
         require(valid == channels.length()) { "La configurazione contiene canali non validi." }
 
-        // Le credenziali EPG sono cifrate nel Keystore del Player e rimosse
-        // dal JSON della configurazione persistente.
-        val customEpg = config.optString("epgSourceUrl").takeIf { it.startsWith("http://", true) || it.startsWith("https://", true) }
+        val config = JSONObject()
+            .put("schemaVersion", 1)
+            .put("updateId", manifest.optString("updateId"))
+            .put("categories", categories)
+            .put("channels", channels)
+        val customEpg = manifest.optString("epgSourceUrl")
+            .takeIf { it.startsWith("http://", true) || it.startsWith("https://", true) }
         saveCustomEpgSource(context, customEpg)
-        val safeConfig = JSONObject(config.toString()).apply { remove("epgSourceUrl") }
 
-        // Salvataggio atomico: la versione avanza solo dopo aver validato l'intera lista.
+        // Commit locale solo dopo aver ricevuto e validato tutti i blocchi.
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putString(CONFIG, safeConfig.toString())
-            .putInt(VERSION, result.optInt("version", version))
+            .putString(CONFIG, config.toString())
+            .putInt(VERSION, remoteVersion)
             .putLong(LEASE_EXPIRY, lease)
             .apply()
         return JSONObject()
             .put("unchanged", false)
-            .put("version", result.optInt("version"))
+            .put("version", remoteVersion)
             .put("channelCount", channels.length())
+            .put("chunkCount", chunkCount)
     }
 
     private fun request(
