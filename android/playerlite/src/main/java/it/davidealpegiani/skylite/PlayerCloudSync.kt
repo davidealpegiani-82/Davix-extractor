@@ -110,7 +110,7 @@ internal object PlayerCloudSync {
     }
 
     fun sync(context: Context): JSONObject {
-        val version = currentVersion(context)
+        val version = if (cachedConfig(context) != null) currentVersion(context) else 0
         val manifest = request(context, "GET", "/v2/config/manifest?sinceVersion=$version", null, authenticated = true)
         val lease = manifest.optLong("leaseExpiresAt", 0L)
         require(lease > System.currentTimeMillis()) { "Licenza offline scaduta. Riconnetti il Player." }
