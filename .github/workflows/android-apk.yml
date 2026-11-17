@@ -101,7 +101,9 @@ jobs:
         working-directory: android
         env:
           DAVIX_BUILD_TYPE: ${{ steps.apk-signing.outputs.build_type }}
-        run: gradle --no-daemon ":app:assemble${DAVIX_BUILD_TYPE}" ":playerlite:assemble${DAVIX_BUILD_TYPE}"
+        run: |
+          gradle --no-daemon ":playerlite:testDebugUnitTest"
+          gradle --no-daemon ":app:assemble${DAVIX_BUILD_TYPE}" ":playerlite:assemble${DAVIX_BUILD_TYPE}"
       - name: Collect and rename APKs
         env:
           DAVIX_BUILD_TYPE: ${{ steps.apk-signing.outputs.build_type }}
