@@ -9,6 +9,7 @@ const liteUpdater = readFileSync('android/playerlite/src/main/java/it/davidealpe
 const extractorUpdater = readFileSync('android/app/src/main/java/it/davidealpegiani/skyunoextractor/DavixUpdater.kt', 'utf8');
 const extractorKotlin = readFileSync('android/app/src/main/java/it/davidealpegiani/skyunoextractor/MainActivity.kt', 'utf8');
 const epgManager = readFileSync('android/playerlite/src/main/java/it/davidealpegiani/skylite/EpgGuideManager.kt', 'utf8');
+const epgMatcher = readFileSync('android/playerlite/src/main/java/it/davidealpegiani/skylite/EpgChannelMatcher.kt', 'utf8');
 const playerCloudSync = readFileSync('android/playerlite/src/main/java/it/davidealpegiani/skylite/PlayerCloudSync.kt', 'utf8');
 const sourceSettings = readFileSync('android/app/src/main/java/it/davidealpegiani/skyunoextractor/IptvSourceSettings.kt', 'utf8');
 assert.match(epgManager, /MAX_DECOMPRESSED_BYTES = 48L \* 1024L \* 1024L/, 'EPG downloads must be capped after decompression');
@@ -174,7 +175,8 @@ assert.match(lite, /refreshEpgIfNeeded\(/, 'Player Lite must refresh external EP
 assert.match(lite, /EpgGuideManager\.formatTime/, 'Player Lite must show current and next programme times');
 assert.match(epgManager, /iptv-epg\.org\/files\/epg-it\.xml\.gz/, 'EPG manager must use the Italian XMLTV aggregate');
 assert.match(epgManager, /guidatv\.sky\.it\.xml/, 'EPG manager must include the Sky XMLTV fallback');
-assert.match(epgManager, /best\.second >= 0\.92/, 'Fuzzy EPG matching must reject uncertain channel names');
+assert.match(epgMatcher, /best\.second >= minimumScore/, 'Fuzzy EPG matching must reject uncertain channel names');
+assert.match(epgMatcher, /best\.second - runnerUp >= minimumMargin/, 'Fuzzy EPG matching must reject ambiguous near-ties');
 assert.match(lite, /addCategoryFolder\(/, 'Player Lite must render categories as expandable folders');
 assert.match(lite, /expandedCategoryPaths\.add\(key\)/, 'Player Lite folders must toggle open and closed');
 assert.match(liteManifest, /LEANBACK_LAUNCHER/, 'Player Lite must be discoverable by Android TV launchers');
