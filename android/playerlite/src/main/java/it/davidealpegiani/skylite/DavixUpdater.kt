@@ -87,10 +87,12 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
             receiverRegistered = true
         }
 
-        // Riprende un eventuale download/installazione in background senza interrogare Binder sul main thread.
-        resumePendingInstall(activity)
+        // Riprende il download solo dopo aver verificato che la versione richiesta non sia già installata.
         executor.execute {
             try {
+                val cleaned = clearCompletedInstallIfApplied()
+                if (!cleaned) resumePendingInstall(activity)
+
                 val now = System.currentTimeMillis()
                 val lastCheck = prefs.getLong("last_version_check_at", 0L)
                 if (now - lastCheck < CHECK_INTERVAL_MS || hasPendingDownload()) return@execute
@@ -128,7 +130,7 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
                             "DAVIX $latestName disponibile: download automatico avviato",
                             Toast.LENGTH_LONG
                         ).show()
-                        downloadUpdate(current, latestName, apkUrl)
+                        downloadUpdate(current, latestName, apkUrl, latestCode)
                     }
                 }
             } catch (_: Exception) {
@@ -138,6 +140,37 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
     }
 
 
+
+    private fun clearCompletedInstallIfApplied(): Boolean {
+        val targetCode = prefs.getLong("pending_version_code", -1L)
+        if (targetCode <= 0L) return false
+        val currentCode = runCatching {
+            val info = app.packageManager.getPackageInfo(app.packageName, 0)
+            if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else {
+                @Suppress("DEPRECATION")
+                info.versionCode.toLong()
+            }
+        }.getOrDefault(0L)
+        if (currentCode < targetCode) return false
+
+        val staleId = prefs.getLong("pending_download_id", -1L)
+        if (staleId > 0L) {
+            runCatching {
+                (app.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).remove(staleId)
+            }
+        }
+        prefs.edit()
+            .remove("pending_download_id")
+            .remove("pending_apk_path")
+            .remove("pending_version_code")
+            .putBoolean("installer_launched", false)
+            .putBoolean("download_completed", false)
+            .putBoolean("awaiting_install_permission", false)
+            .putLong("last_version_check_at", 0L)
+            .apply()
+        activeDownloadId = -1L
+        return true
+    }
 
     private fun hasPendingDownload(): Boolean {
         val id = prefs.getLong("pending_download_id", -1L)
@@ -202,7 +235,7 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
                         .setMessage(message)
                         .setNegativeButton("Chiudi", null)
                         .setPositiveButton(if (updateAvailable) "Scarica e aggiorna" else "Scarica APK") { _, _ ->
-                            downloadUpdate(activity, latestName, apkUrl)
+                            downloadUpdate(activity, latestName, apkUrl, latestCode)
                         }
                         .show()
                 }
@@ -219,7 +252,7 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
         }
     }
 
-    private fun downloadUpdate(activity: Activity, versionName: String, apkUrl: String) {
+    private fun downloadUpdate(activity: Activity, versionName: String, apkUrl: String, versionCode: Long) {
         if (downloadStartInProgress) return
         downloadStartInProgress = true
         executor.execute {
@@ -237,6 +270,7 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
                 prefs.edit()
                     .putLong("pending_download_id", id)
                     .putString("pending_apk_path", destination.absolutePath)
+                    .putLong("pending_version_code", versionCode)
                     .putBoolean("installer_launched", false)
                     .apply()
                 main.post {
