@@ -96,13 +96,58 @@ internal object CloudSyncAdmin {
         categories: JSONArray = JSONArray(),
         epgSourceUrl: String? = null
     ): JSONObject {
-        val payload = JSONObject()
-            .put("schemaVersion", 1)
-            .put("updateId", java.util.UUID.randomUUID().toString())
+        require(channels.length() in 1..10_000) {
+            "La sincronizzazione supporta da 1 a 10.000 canali."
+        }
+        require(categories.length() <= 100) { "La configurazione contiene troppe categorie." }
+
+        val uploadId = java.util.UUID.randomUUID().toString()
+        val updateId = java.util.UUID.randomUUID().toString()
+        val manifest = JSONObject()
+            .put("uploadId", uploadId)
+            .put("updateId", updateId)
+            .put("expectedChannels", channels.length())
             .put("categories", categories)
-            .put("channels", channels)
-        if (!epgSourceUrl.isNullOrBlank()) payload.put("epgSourceUrl", epgSourceUrl.trim())
-        return adminRequest(context, "POST", "/v1/admin/config/publish", payload)
+        if (!epgSourceUrl.isNullOrBlank()) manifest.put("epgSourceUrl", epgSourceUrl.trim())
+        adminRequest(context, "POST", "/v2/admin/config/uploads/start", manifest)
+
+        var index = 0
+        var start = 0
+        while (start < channels.length()) {
+            val chunk = JSONArray()
+            var cursor = start
+            while (cursor < channels.length() && cursor - start < 80) {
+                chunk.put(channels.get(cursor))
+                val candidate = JSONObject()
+                    .put("uploadId", uploadId)
+                    .put("index", index)
+                    .put("channels", chunk)
+                val candidateBytes = candidate.toString().toByteArray(StandardCharsets.UTF_8).size
+                if (candidateBytes > 800_000) {
+                    chunk.remove(chunk.length() - 1)
+                    if (chunk.length() == 0) {
+                        throw IllegalArgumentException(
+                            "Un singolo canale supera il limite di trasferimento. Riduci le dimensioni del logo o delle intestazioni e riprova."
+                        )
+                    }
+                    break
+                }
+                cursor++
+            }
+            val chunkPayload = JSONObject()
+                .put("uploadId", uploadId)
+                .put("index", index)
+                .put("channels", chunk)
+            adminRequest(context, "POST", "/v2/admin/config/uploads/chunk", chunkPayload)
+            start = cursor
+            index++
+        }
+        return adminRequest(
+            context,
+            "POST",
+            "/v2/admin/config/uploads/commit",
+            JSONObject().put("uploadId", uploadId)
+        )
     }
 
     fun createActivationCode(context: Context): JSONObject =

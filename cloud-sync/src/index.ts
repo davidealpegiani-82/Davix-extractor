@@ -365,6 +365,180 @@ async function route(request: Request, env: Env): Promise<Response> {
     });
   }
 
+  if (request.method === "GET" && path === "/v2/config/manifest") {
+    const device = await requireDevice(request, env);
+    if (!device) return response({ error: "device_not_authorized" }, 403);
+    const row = await env.DB.prepare(
+      "SELECT version, update_id, payload, checksum, published_at FROM config WHERE config_id = 1"
+    ).first<{ version: number; update_id: string; payload: string; checksum: string; published_at: number }>();
+    if (!row) return response({ error: "no_configuration_published" }, 404);
+    const now = Date.now();
+    const leaseExpiresAt = now + 72 * 60 * 60 * 1000;
+    await env.DB.prepare("UPDATE devices SET last_seen_at = ?, lease_expires_at = ? WHERE device_id = ? AND status = 'approved'")
+      .bind(now, leaseExpiresAt, device.id).run();
+    const sinceVersion = Number(url.searchParams.get("sinceVersion") || "0");
+    const metadata = {
+      schemaVersion: 2,
+      leaseExpiresAt,
+      version: row.version,
+      updateId: row.update_id,
+      checksum: row.checksum,
+      publishedAt: row.published_at,
+    };
+    if (Number.isSafeInteger(sinceVersion) && sinceVersion >= row.version) {
+      return response({ ...metadata, unchanged: true });
+    }
+    const config = JSON.parse(row.payload) as Record<string, unknown>;
+    const channels = Array.isArray(config.channels) ? config.channels : [];
+    if (typeof config.epgSourceEncrypted === "string") {
+      config.epgSourceUrl = await decryptEpgSource(config.epgSourceEncrypted, env.SKY_ADMIN_KEY);
+      delete config.epgSourceEncrypted;
+    }
+    return response({
+      ...metadata,
+      unchanged: false,
+      channelCount: channels.length,
+      chunkSize: 80,
+      chunkCount: Math.ceil(channels.length / 80),
+      categories: Array.isArray(config.categories) ? config.categories : [],
+      ...(typeof config.epgSourceUrl === "string" ? { epgSourceUrl: config.epgSourceUrl } : {}),
+    });
+  }
+
+  if (request.method === "GET" && path === "/v2/config/chunk") {
+    const device = await requireDevice(request, env);
+    if (!device) return response({ error: "device_not_authorized" }, 403);
+    const version = Number(url.searchParams.get("version") || "0");
+    const index = Number(url.searchParams.get("index") || "-1");
+    if (!Number.isSafeInteger(version) || version < 1 || !Number.isSafeInteger(index) || index < 0 || index > 124) {
+      return response({ error: "invalid_chunk_request" }, 400);
+    }
+    const row = await env.DB.prepare("SELECT version, payload FROM config WHERE config_id = 1")
+      .first<{ version: number; payload: string }>();
+    if (!row) return response({ error: "no_configuration_published" }, 404);
+    if (row.version !== version) return response({ error: "configuration_changed", version: row.version }, 409);
+    const config = JSON.parse(row.payload) as Record<string, unknown>;
+    const channels = Array.isArray(config.channels) ? config.channels : [];
+    const start = index * 80;
+    if (start >= channels.length && !(channels.length === 0 && index === 0)) {
+      return response({ error: "chunk_not_found" }, 404);
+    }
+    return response({
+      version,
+      index,
+      chunkCount: Math.ceil(channels.length / 80),
+      channels: channels.slice(start, start + 80),
+    });
+  }
+
+  if (request.method === "POST" && path === "/v2/admin/config/uploads/start") {
+    if (!(await requireAdmin(request, env))) return response({ error: "unauthorized" }, 401);
+    let body: any;
+    try { body = await readJson(request, 64_000); } catch { return response({ error: "invalid_json" }, 400); }
+    const uploadId = typeof body.uploadId === "string" ? body.uploadId : "";
+    const updateId = typeof body.updateId === "string" ? body.updateId : "";
+    const expectedChannels = Number(body.expectedChannels);
+    const categories = body.categories == null ? [] : body.categories;
+    if (!/^[A-Za-z0-9-]{8,100}$/.test(uploadId) ||
+        typeof updateId !== "string" || updateId.length < 8 || updateId.length > 100 ||
+        !Number.isSafeInteger(expectedChannels) || expectedChannels < 1 || expectedChannels > 10000 ||
+        !Array.isArray(categories) || categories.length > 100 ||
+        !categories.every((category: unknown) => typeof category === "string" && category.trim().length > 0 && category.length <= 80) ||
+        (body.epgSourceUrl != null && !validHttpUrl(body.epgSourceUrl))) {
+      return response({ error: "invalid_upload_manifest" }, 400);
+    }
+    const epgSourceEncrypted = typeof body.epgSourceUrl === "string" && body.epgSourceUrl.trim()
+      ? await encryptEpgSource(body.epgSourceUrl.trim(), env.SKY_ADMIN_KEY)
+      : null;
+    const now = Date.now();
+    await env.DB.prepare("DELETE FROM config_uploads WHERE created_at < ?").bind(now - 6 * 60 * 60 * 1000).run();
+    await env.DB.prepare("INSERT OR REPLACE INTO config_uploads (upload_id, update_id, expected_channels, categories_json, epg_source_encrypted, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+      .bind(uploadId, updateId, expectedChannels, JSON.stringify([...new Set(categories.map((value: string) => value.trim()))]), epgSourceEncrypted, now).run();
+    return response({ started: true, uploadId, expectedChannels, chunkSize: 80 });
+  }
+
+  if (request.method === "POST" && path === "/v2/admin/config/uploads/chunk") {
+    if (!(await requireAdmin(request, env))) return response({ error: "unauthorized" }, 401);
+    let body: any;
+    try { body = await readJson(request, 900_000); } catch (error) {
+      return response({ error: String(error).includes("PAYLOAD_TOO_LARGE") ? "chunk_too_large" : "invalid_json" }, 400);
+    }
+    const uploadId = typeof body.uploadId === "string" ? body.uploadId : "";
+    const index = Number(body.index);
+    const channels = body.channels;
+    if (!/^[A-Za-z0-9-]{8,100}$/.test(uploadId) || !Number.isSafeInteger(index) || index < 0 || index > 124 ||
+        !Array.isArray(channels) || channels.length < 1 || channels.length > 80 || !channels.every(validChannel)) {
+      return response({ error: "invalid_upload_chunk" }, 400);
+    }
+    const upload = await env.DB.prepare("SELECT upload_id FROM config_uploads WHERE upload_id = ? AND created_at > ?")
+      .bind(uploadId, Date.now() - 6 * 60 * 60 * 1000).first<{ upload_id: string }>();
+    if (!upload) return response({ error: "upload_not_found_or_expired" }, 404);
+    const channelsJson = JSON.stringify(channels);
+    if (new TextEncoder().encode(channelsJson).byteLength > 800_000) return response({ error: "chunk_too_large" }, 413);
+    const checksum = await sha256(channelsJson);
+    await env.DB.prepare("INSERT OR REPLACE INTO config_upload_chunks (upload_id, chunk_index, channels_json, channel_count, checksum) VALUES (?, ?, ?, ?, ?)")
+      .bind(uploadId, index, channelsJson, channels.length, checksum).run();
+    return response({ stored: true, uploadId, index, channelCount: channels.length, checksum });
+  }
+
+  if (request.method === "POST" && path === "/v2/admin/config/uploads/commit") {
+    if (!(await requireAdmin(request, env))) return response({ error: "unauthorized" }, 401);
+    let body: any;
+    try { body = await readJson(request, 16_384); } catch { return response({ error: "invalid_json" }, 400); }
+    const uploadId = typeof body.uploadId === "string" ? body.uploadId : "";
+    if (!/^[A-Za-z0-9-]{8,100}$/.test(uploadId)) return response({ error: "invalid_upload_id" }, 400);
+    const upload = await env.DB.prepare(
+      "SELECT upload_id, update_id, expected_channels, categories_json, epg_source_encrypted FROM config_uploads WHERE upload_id = ? AND created_at > ?"
+    ).bind(uploadId, Date.now() - 6 * 60 * 60 * 1000)
+      .first<{ upload_id: string; update_id: string; expected_channels: number; categories_json: string; epg_source_encrypted: string | null }>();
+    if (!upload) return response({ error: "upload_not_found_or_expired" }, 404);
+    const stored = await env.DB.prepare(
+      "SELECT chunk_index, channels_json, channel_count, checksum FROM config_upload_chunks WHERE upload_id = ? ORDER BY chunk_index ASC"
+    ).bind(uploadId).all<{ chunk_index: number; channels_json: string; channel_count: number; checksum: string }>();
+    const chunks = stored.results || [];
+    if (chunks.length === 0 || chunks.some((chunk, index) => chunk.chunk_index !== index)) {
+      return response({ error: "upload_chunks_incomplete", receivedChunks: chunks.length });
+    }
+    const channels: Channel[] = [];
+    for (const chunk of chunks) {
+      if (await sha256(chunk.channels_json) !== chunk.checksum) return response({ error: "upload_chunk_checksum_mismatch", index: chunk.chunk_index }, 409);
+      let parsed: unknown;
+      try { parsed = JSON.parse(chunk.channels_json); } catch { return response({ error: "upload_chunk_invalid", index: chunk.chunk_index }, 400); }
+      if (!Array.isArray(parsed) || parsed.length !== chunk.channel_count || !parsed.every(validChannel)) {
+        return response({ error: "upload_chunk_invalid", index: chunk.chunk_index }, 400);
+      }
+      channels.push(...parsed);
+    }
+    if (channels.length !== upload.expected_channels || channels.length > 10000) {
+      return response({ error: "upload_channel_count_mismatch", expected: upload.expected_channels, received: channels.length }, 409);
+    }
+    const categories = JSON.parse(upload.categories_json) as string[];
+    const payload = JSON.stringify({
+      schemaVersion: 1,
+      updateId: upload.update_id,
+      categories,
+      channels,
+      ...(upload.epg_source_encrypted ? { epgSourceEncrypted: upload.epg_source_encrypted } : {}),
+    });
+    if (new TextEncoder().encode(payload).byteLength > 1_500_000) {
+      return response({ error: "configuration_too_large", maxBytes: 1_500_000 }, 413);
+    }
+    const checksum = await sha256(payload);
+    const publishedAt = Date.now();
+    const results = await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO config (config_id, version, update_id, payload, checksum, published_at) VALUES (1, 1, ?, ?, ?, ?) ON CONFLICT(config_id) DO UPDATE SET version = config.version + 1, update_id = excluded.update_id, payload = excluded.payload, checksum = excluded.checksum, published_at = excluded.published_at RETURNING version"
+      ).bind(upload.update_id, payload, checksum, publishedAt),
+      env.DB.prepare("DELETE FROM config_upload_chunks WHERE upload_id = ?").bind(uploadId),
+      env.DB.prepare("DELETE FROM config_uploads WHERE upload_id = ?").bind(uploadId),
+    ]);
+    const published = await env.DB.prepare("SELECT version FROM config WHERE config_id = 1 AND update_id = ?")
+      .bind(upload.update_id).first<{ version: number }>();
+    const version = Number(published?.version || 0);
+    if (!version) throw new Error("CONFIG_PUBLISH_FAILED");
+    return response({ published: true, version, updateId: upload.update_id, checksum, publishedAt, channelCount: channels.length, chunkCount: chunks.length });
+  }
+
   if (request.method === "POST" && path === "/v1/admin/config/publish") {
     if (!(await requireAdmin(request, env))) return response({ error: "unauthorized" }, 401);
     let body: PublishedConfig;
