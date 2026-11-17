@@ -26,42 +26,47 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
     private val app = context.applicationContext
     private val prefs = app.getSharedPreferences("davix_app_updater", Context.MODE_PRIVATE)
     private val main = Handler(Looper.getMainLooper())
-    private val executor = Executors.newSingleThreadExecutor()
-    private var activeActivity: Activity? = null
+    private val executor = Executors.newFixedThreadPool(2)
+    @Volatile private var activeActivity: Activity? = null
     private var activeDownloadId = -1L
     private var receiverRegistered = false
     private var checkedThisProcess = false
 
-    private var activityResumed = false
+    @Volatile private var activityResumed = false
+    private var downloadStartInProgress = false
 
     private val downloadReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             if (intent.action != DownloadManager.ACTION_DOWNLOAD_COMPLETE) return
             val id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L)
             if (id != prefs.getLong("pending_download_id", -1L)) return
-            val manager = app.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-            manager.query(DownloadManager.Query().setFilterById(id)).use { cursor ->
-                if (!cursor.moveToFirst()) return
-                val status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+
+            executor.execute {
+                val status = runCatching {
+                    val manager = app.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+                    manager.query(DownloadManager.Query().setFilterById(id)).use { cursor ->
+                        if (cursor.moveToFirst()) cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)) else null
+                    }
+                }.getOrNull() ?: return@execute
+
                 if (status == DownloadManager.STATUS_SUCCESSFUL) {
                     prefs.edit().putBoolean("download_completed", true).apply()
-                    main.post {
-                        val current = activeActivity
-                        if (activityResumed && current != null && !current.isFinishing && !current.isDestroyed) {
-                            resumePendingInstall(current)
-                        }
-                    }
-                } else {
-                    main.post {
-                        val current = activeActivity
-                        if (activityResumed && current != null && !current.isFinishing && !current.isDestroyed) {
-                            Toast.makeText(current, "Download aggiornamento non riuscito", Toast.LENGTH_LONG).show()
-                        }
+                }
+                main.post {
+                    if (id != prefs.getLong("pending_download_id", -1L)) return@post
+                    val current = activeActivity
+                    if (!activityResumed || current == null || current.isFinishing || current.isDestroyed) return@post
+                    if (status == DownloadManager.STATUS_SUCCESSFUL) {
+                        resumePendingInstall(current)
+                    } else {
+                        Toast.makeText(current, "Download aggiornamento non riuscito", Toast.LENGTH_LONG).show()
                     }
                 }
             }
         }
     }
+
+
 
     fun onActivityResumed(activity: Activity) {
         activeActivity = activity
@@ -75,11 +80,6 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
 
     fun check(activity: Activity) {
         activeActivity = activity
-        // Se un download precedente è terminato mentre DAVIX era chiuso,
-        // riprende qui la procedura di installazione Android.
-        resumePendingInstall(activity)
-
-        activeDownloadId = prefs.getLong("pending_download_id", -1L)
         if (!receiverRegistered) {
             val filter = IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE)
             if (Build.VERSION.SDK_INT >= 33) app.registerReceiver(downloadReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
@@ -87,22 +87,26 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
             receiverRegistered = true
         }
 
-        // Controllo ad ogni ritorno in primo piano, con intervallo minimo di 6 ore.
-        val now = System.currentTimeMillis()
-        val lastCheck = prefs.getLong("last_version_check_at", 0L)
-        if (now - lastCheck < CHECK_INTERVAL_MS || hasPendingDownload()) return
-        prefs.edit().putLong("last_version_check_at", now).apply()
-
+        // Riprende un eventuale download/installazione in background senza interrogare Binder sul main thread.
+        resumePendingInstall(activity)
         executor.execute {
             try {
+                val now = System.currentTimeMillis()
+                val lastCheck = prefs.getLong("last_version_check_at", 0L)
+                if (now - lastCheck < CHECK_INTERVAL_MS || hasPendingDownload()) return@execute
+                prefs.edit().putLong("last_version_check_at", now).apply()
+
                 val connection = (URL(MANIFEST_URL).openConnection() as HttpURLConnection).apply {
                     connectTimeout = 12000
                     readTimeout = 12000
                     setRequestProperty("Accept", "application/json")
                     setRequestProperty("Cache-Control", "no-cache")
                 }
-                val manifest = connection.inputStream.bufferedReader().use { it.readText() }
-                connection.disconnect()
+                val manifest = try {
+                    connection.inputStream.bufferedReader().use { it.readText() }
+                } finally {
+                    connection.disconnect()
+                }
                 val item = JSONObject(manifest).getJSONObject(appKey)
                 val latestCode = item.getLong("versionCode")
                 val latestName = item.getString("versionName")
@@ -119,8 +123,6 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
                     main.post {
                         val current = activeActivity ?: return@post
                         if (!activityResumed || current.isFinishing || current.isDestroyed) return@post
-                        // Il pacchetto viene scaricato automaticamente. Android mostrerà
-                        // comunque la propria schermata di conferma per l'installazione.
                         Toast.makeText(
                             current,
                             "DAVIX $latestName disponibile: download automatico avviato",
@@ -130,12 +132,12 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
                     }
                 }
             } catch (_: Exception) {
-                // Il controllo aggiornamenti è non bloccante: DAVIX resta utilizzabile offline.
-                // In caso di errore riproverà al prossimo controllo utile.
                 prefs.edit().putLong("last_version_check_at", 0L).apply()
             }
         }
     }
+
+
 
     private fun hasPendingDownload(): Boolean {
         val id = prefs.getLong("pending_download_id", -1L)
@@ -218,52 +220,82 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
     }
 
     private fun downloadUpdate(activity: Activity, versionName: String, apkUrl: String) {
-        try {
-            val fileName = "DAVIX-$appKey-$versionName.apk"
-            val request = DownloadManager.Request(Uri.parse(apkUrl))
-                .setTitle("Aggiornamento DAVIX")
-                .setDescription("Download versione $versionName")
-                .setMimeType("application/vnd.android.package-archive")
-                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                .setDestinationInExternalFilesDir(app, Environment.DIRECTORY_DOWNLOADS, fileName)
-            val manager = app.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-            val id = manager.enqueue(request)
-            activeDownloadId = id
-            val destination = File(app.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), fileName)
-            prefs.edit()
-                .putLong("pending_download_id", id)
-                .putString("pending_apk_path", destination.absolutePath)
-                .putBoolean("installer_launched", false)
-                .apply()
-            Toast.makeText(activity, "Download aggiornamento avviato", Toast.LENGTH_SHORT).show()
-        } catch (_: Exception) {
-            Toast.makeText(activity, "Impossibile avviare il download", Toast.LENGTH_LONG).show()
+        if (downloadStartInProgress) return
+        downloadStartInProgress = true
+        executor.execute {
+            try {
+                val fileName = "DAVIX-$appKey-$versionName.apk"
+                val request = DownloadManager.Request(Uri.parse(apkUrl))
+                    .setTitle("Aggiornamento DAVIX")
+                    .setDescription("Download versione $versionName")
+                    .setMimeType("application/vnd.android.package-archive")
+                    .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                    .setDestinationInExternalFilesDir(app, Environment.DIRECTORY_DOWNLOADS, fileName)
+                val manager = app.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+                val id = manager.enqueue(request)
+                val destination = File(app.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), fileName)
+                prefs.edit()
+                    .putLong("pending_download_id", id)
+                    .putString("pending_apk_path", destination.absolutePath)
+                    .putBoolean("installer_launched", false)
+                    .apply()
+                main.post {
+                    downloadStartInProgress = false
+                    if (!activity.isFinishing && !activity.isDestroyed) {
+                        Toast.makeText(activity, "Download aggiornamento avviato", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } catch (_: Exception) {
+                main.post {
+                    downloadStartInProgress = false
+                    if (!activity.isFinishing && !activity.isDestroyed) {
+                        Toast.makeText(activity, "Impossibile avviare il download", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
         }
     }
+
+
 
     private fun resumePendingInstall(activity: Activity) {
         if (prefs.getBoolean("installer_launched", false)) return
         val path = prefs.getString("pending_apk_path", null) ?: return
         val id = prefs.getLong("pending_download_id", -1L)
-        if (id > 0L) {
-            val manager = app.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-            manager.query(DownloadManager.Query().setFilterById(id)).use { cursor ->
-                if (!cursor.moveToFirst()) return
-                if (cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)) != DownloadManager.STATUS_SUCCESSFUL) return
+
+        executor.execute {
+            val status = if (id > 0L) {
+                runCatching {
+                    val manager = app.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+                    manager.query(DownloadManager.Query().setFilterById(id)).use { cursor ->
+                        if (cursor.moveToFirst()) cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)) else null
+                    }
+                }.getOrNull()
+            } else {
+                DownloadManager.STATUS_SUCCESSFUL
+            }
+
+            if (status != DownloadManager.STATUS_SUCCESSFUL) return@execute
+            val file = File(path)
+            if (!file.exists() || file.length() <= 0L) return@execute
+
+            main.post {
+                if (activeActivity !== activity || !activityResumed || activity.isFinishing || activity.isDestroyed) return@post
+                val waitingForPermission = prefs.getBoolean("awaiting_install_permission", false)
+                val canInstall = Build.VERSION.SDK_INT < 26 || activity.packageManager.canRequestPackageInstalls()
+                if (waitingForPermission) {
+                    prefs.edit().putBoolean("awaiting_install_permission", false).apply()
+                    if (!canInstall) {
+                        Toast.makeText(activity, "Per installare l'aggiornamento, consenti a DAVIX di installare app da questa origine e torna qui.", Toast.LENGTH_LONG).show()
+                        return@post
+                    }
+                }
+                installOrRequestPermission(activity, file)
             }
         }
-        val file = File(path)
-        val waitingForPermission = prefs.getBoolean("awaiting_install_permission", false)
-        val canInstall = Build.VERSION.SDK_INT < 26 || activity.packageManager.canRequestPackageInstalls()
-        if (waitingForPermission) {
-            prefs.edit().putBoolean("awaiting_install_permission", false).apply()
-            if (!canInstall) {
-                Toast.makeText(activity, "Per installare l'aggiornamento, consenti a DAVIX di installare app da questa origine e torna qui.", Toast.LENGTH_LONG).show()
-                return
-            }
-        }
-        if (file.exists() && file.length() > 0L) installOrRequestPermission(activity, file)
     }
+
+
 
     private fun installOrRequestPermission(activity: Activity, file: File) {
         if (Build.VERSION.SDK_INT >= 26 && !activity.packageManager.canRequestPackageInstalls()) {
