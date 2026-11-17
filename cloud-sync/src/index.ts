@@ -532,7 +532,8 @@ async function route(request: Request, env: Env): Promise<Response> {
       env.DB.prepare("DELETE FROM config_upload_chunks WHERE upload_id = ?").bind(uploadId),
       env.DB.prepare("DELETE FROM config_uploads WHERE upload_id = ?").bind(uploadId),
     ]);
-    const version = Number(results[0]?.results?.[0]?.version || 0);
+    const publishedResult = results[0] as D1Result<{ version: number }>;
+    const version = Number(publishedResult.results?.[0]?.version || 0);
     if (!version) throw new Error("CONFIG_PUBLISH_FAILED");
     return response({ published: true, version, updateId: upload.update_id, checksum, publishedAt, channelCount: channels.length, chunkCount: chunks.length });
   }
