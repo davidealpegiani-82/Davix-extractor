@@ -231,8 +231,15 @@ assert.match(admin, /epgSourceUrl/, 'Extractor Cloud Sync publish must forward t
 assert.match(cloudSync, /encryptEpgSource\(/, 'Cloud Sync must encrypt the custom XMLTV URL before persistence');
 assert.match(cloudSync, /decryptEpgSource\(/, 'Cloud Sync must decrypt the XMLTV URL only for authorized Player configuration responses');
 assert.match(cloudSync, /epgSourceEncrypted/, 'Cloud Sync database payload must contain ciphertext rather than the XMLTV URL');
+assert.match(cloudSync, /\/v2\/admin\/config\/uploads\/start/, 'Cloud Sync must stage chunked uploads before publishing');
+assert.match(cloudSync, /upload_chunk_checksum_mismatch/, 'Cloud Sync must reject corrupted upload chunks');
+assert.match(cloudSync, /configuration_too_large/, 'Cloud Sync must enforce the D1 row size limit before publishing');
 assert.match(playerCloudSync, /saveCustomEpgSource\(/, 'Player Lite must save the custom XMLTV URL encrypted');
-assert.match(playerCloudSync, /remove\("epgSourceUrl"\)/, 'Player Lite must not persist the credential-bearing URL in plain config JSON');
+assert.match(playerCloudSync, /saveCustomEpgSource\(context, customEpg\)/, 'Player Lite must store the credential-bearing XMLTV URL in encrypted preferences');
+assert.match(playerCloudSync, /\.put\("channels", channels\)/, 'Player Lite must commit the fully downloaded channel list only after chunk validation');
+assert.match(playerCloudSync, /\/v2\/config\/manifest/, 'Player Lite must retrieve the versioned Cloud Sync manifest');
+assert.match(playerCloudSync, /\/v2\/config\/chunk/, 'Player Lite must retrieve configuration in bounded chunks');
+assert.match(playerCloudSync, /channelCount in 1\.\.10_000/, 'Player Lite must support playlists larger than 1,000 channels');
 assert.match(lite, /PlayerCloudSync\.customEpgSource\(this\)/, 'Player Lite must use the protected custom XMLTV source');
 assert.match(epgManager, /XMLTV personalizzato/, 'Custom XMLTV must be added as the primary EPG source');
 
