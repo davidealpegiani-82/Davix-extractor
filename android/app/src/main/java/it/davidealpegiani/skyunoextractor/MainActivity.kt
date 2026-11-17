@@ -1258,7 +1258,7 @@ class MainActivity : FragmentActivity() {
         val destination = pendingImportCategory
         updateImportProgress("Preparazione importazione di ${uris.size} file…", null)
         Thread {
-            val parsedFiles = mutableListOf<Triple<String, ByteArray, List<TvChannel>>>()
+            val parsedFiles = mutableListOf<List<TvChannel>>()
             var invalid = 0
             uris.forEachIndexed { index, uri ->
                 try {
@@ -1274,7 +1274,7 @@ class MainActivity : FragmentActivity() {
                     }
                     if (found.isEmpty()) invalid++ else {
                         savePlaylistCopy(displayName, bytes)
-                        parsedFiles.add(Triple(displayName, bytes, found))
+                        parsedFiles.add(found)
                     }
                 } catch (e: Exception) {
                     invalid++
@@ -1288,7 +1288,7 @@ class MainActivity : FragmentActivity() {
                     .toHashSet()
                 var added = 0
                 var duplicates = 0
-                parsedFiles.forEach { (_, _, found) ->
+                parsedFiles.forEach { found ->
                     restoreChannelCategories(found)
                     if (destination != null) {
                         found.forEach { it.category = destination }
