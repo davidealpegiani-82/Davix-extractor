@@ -116,18 +116,28 @@ internal object CloudSyncAdmin {
         while (start < channels.length()) {
             val chunk = JSONArray()
             var cursor = start
-            while (cursor < channels.length() && chunk.length() < 80) {
+            while (cursor < channels.length() && cursor - start < 80) {
                 chunk.put(channels.get(cursor))
+                val candidate = JSONObject()
+                    .put("uploadId", uploadId)
+                    .put("index", index)
+                    .put("channels", chunk)
+                val candidateBytes = candidate.toString().toByteArray(StandardCharsets.UTF_8).size
+                if (candidateBytes > 800_000) {
+                    chunk.remove(chunk.length() - 1)
+                    if (chunk.length() == 0) {
+                        throw IllegalArgumentException(
+                            "Un singolo canale supera il limite di trasferimento. Riduci le dimensioni del logo o delle intestazioni e riprova."
+                        )
+                    }
+                    break
+                }
                 cursor++
             }
             val chunkPayload = JSONObject()
                 .put("uploadId", uploadId)
                 .put("index", index)
                 .put("channels", chunk)
-            val bytes = chunkPayload.toString().toByteArray(StandardCharsets.UTF_8).size
-            require(bytes <= 850_000) {
-                "Un gruppo di canali supera il limite di trasferimento. Riduci le dimensioni di loghi o intestazioni e riprova."
-            }
             adminRequest(context, "POST", "/v2/admin/config/uploads/chunk", chunkPayload)
             start = cursor
             index++
