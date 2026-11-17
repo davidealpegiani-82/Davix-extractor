@@ -224,7 +224,7 @@ assert.ok(template.includes("const roots="), 'HTML Player must render category t
 assert.ok(cloudSync.includes("channel.category.length > 80"), 'Cloud Sync must accept nested category paths');
 assert.ok(cloudSync.includes("category.length <= 80"), 'Cloud Sync category metadata must accept nested paths');
 assert.match(cloudSync, /version = config\.version \+ 1[\s\S]*?RETURNING version/, 'Cloud Sync must increment published config versions atomically');
-assert.doesNotMatch(cloudSync, /SELECT version FROM config WHERE config_id = 1/, 'Cloud Sync must not use a race-prone read-then-write version sequence');
+assert.match(cloudSync, /SELECT version FROM config WHERE config_id = 1 AND update_id = \?/, 'Cloud Sync must read the just-committed version by its unique update ID');
 assert.match(playerCloudSync, /category\.length <= 80/, 'Player Lite must accept the same 80-character category limit as Cloud Sync');
 assert.match(extractorKotlin, /showIptvSourceSettings\(/, 'Extractor must expose direct M3U and XMLTV URL settings');
 assert.match(extractorKotlin, /importPlaylistFromUrl\(/, 'Extractor must download and parse an M3U directly from its URL');
