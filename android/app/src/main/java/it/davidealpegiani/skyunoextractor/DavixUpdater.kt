@@ -181,6 +181,16 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
         // La versione installata è la fonte di verità; rimuove eventuali download residui.
         val staleId = prefs.getLong("pending_download_id", -1L)
         if (staleId > 0L) {
+            // Un download manuale della versione già installata non va cancellato mentre è ancora in corso.
+            val downloadStatus = runCatching {
+                val manager = app.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+                manager.query(DownloadManager.Query().setFilterById(staleId)).use { cursor ->
+                    if (cursor.moveToFirst()) cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)) else null
+                }
+            }.getOrNull()
+            if (downloadStatus == DownloadManager.STATUS_PENDING ||
+                downloadStatus == DownloadManager.STATUS_RUNNING ||
+                downloadStatus == DownloadManager.STATUS_PAUSED) return false
             runCatching {
                 (app.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).remove(staleId)
             }
