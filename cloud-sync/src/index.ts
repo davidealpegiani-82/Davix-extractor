@@ -520,6 +520,9 @@ async function route(request: Request, env: Env): Promise<Response> {
       channels,
       ...(upload.epg_source_encrypted ? { epgSourceEncrypted: upload.epg_source_encrypted } : {}),
     });
+    if (new TextEncoder().encode(payload).byteLength > 1_500_000) {
+      return response({ error: "configuration_too_large", maxBytes: 1_500_000 }, 413);
+    }
     const checksum = await sha256(payload);
     const publishedAt = Date.now();
     const results = await env.DB.batch([
