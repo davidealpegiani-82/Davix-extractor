@@ -25,3 +25,5 @@ jobs:
         run: node android/scripts/verify-player-template.mjs
       - name: Verify updater background I/O
         run: node android/scripts/verify-updater-background.mjs
+      - name: Verify import memory retention
+        run: node android/scripts/verify-import-memory.mjs
