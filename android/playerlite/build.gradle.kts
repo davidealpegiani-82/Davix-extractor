@@ -18,8 +18,8 @@ android {
         applicationId = "it.davidealpegiani.skylite"
         minSdk = 24
         targetSdk = 35
-        versionCode = 12
-        versionName = "1.2.3"
+        versionCode = 13
+        versionName = "1.2.4"
     }
 
     signingConfigs {
