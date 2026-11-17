@@ -1286,37 +1286,64 @@ class MainActivity : FragmentActivity() {
                 val knownKeys = channels.asSequence()
                     .map { it.name.lowercase(Locale.ROOT) + "|" + it.url }
                     .toHashSet()
+                val knownCategories = categories.toHashSet()
+                val savedCategoryMapping = runCatching {
+                    JSONObject(categoryPrefs.getString("channel_categories_json", "{}") ?: "{}")
+                }.getOrDefault(JSONObject())
+                val channelIterator = parsedFiles.asSequence().flatten().iterator()
                 var added = 0
                 var duplicates = 0
-                parsedFiles.forEach { found ->
-                    restoreChannelCategories(found)
-                    if (destination != null) {
-                        found.forEach { it.category = destination }
-                        if (destination !in categories) categories.add(destination)
-                    } else {
-                        found.forEach { channel ->
-                            val savedManualPath = normalizeCategoryPath(channel.category)
-                            val inferred = inferCategoryPath(channel)
-                            channel.category = if (savedManualPath.contains(" > ") && savedManualPath in categories) savedManualPath else inferred
-                            if (channel.category !in categories) categories.add(channel.category)
+                var processed = 0
+                val totalChannels = parsedFiles.sumOf { it.size }
+                val batchSize = 200
+                val importHandler = android.os.Handler(android.os.Looper.getMainLooper())
+                val importBatch = object : Runnable {
+                    override fun run() {
+                        if (isFinishing || isDestroyed) {
+                            importInProgress = false
+                            return
                         }
-                    }
-                    found.forEach { channel ->
-                        if (!knownKeys.add(channel.name.lowercase(Locale.ROOT) + "|" + channel.url)) duplicates++
-                        else {
-                            channel.selected = !(channel.name.contains("sky", true) && (channel.name.contains("plus", true) || channel.name.contains("+1")))
-                            channels.add(channel)
-                            if (channel.category !in categories) categories.add(channel.category)
-                            added++
+                        var inBatch = 0
+                        while (channelIterator.hasNext() && inBatch < batchSize) {
+                            val channel = channelIterator.next()
+                            val savedCategory = savedCategoryMapping.optString(channel.url)
+                            if (savedCategory.isNotBlank()) channel.category = normalizeCategoryPath(savedCategory)
+                            channel.category = if (destination != null) {
+                                destination
+                            } else {
+                                val savedManualPath = normalizeCategoryPath(channel.category)
+                                val inferred = inferCategoryPath(channel)
+                                if (savedManualPath.contains(" > ") && savedManualPath in knownCategories) savedManualPath else inferred
+                            }
+                            if (knownCategories.add(channel.category)) categories.add(channel.category)
+                            val key = channel.name.lowercase(Locale.ROOT) + "|" + channel.url
+                            if (!knownKeys.add(key)) {
+                                duplicates++
+                            } else {
+                                channel.selected = !(channel.name.contains("sky", true) && (channel.name.contains("plus", true) || channel.name.contains("+1")))
+                                channels.add(channel)
+                                added++
+                            }
+                            processed++
+                            inBatch++
+                        }
+                        if (channelIterator.hasNext()) {
+                            updateImportProgress("Inserimento canali · $processed / $totalChannels", (processed * 99 / totalChannels.coerceAtLeast(1)).coerceIn(1, 99))
+                            importHandler.postDelayed(this, 1L)
+                        } else {
+                            if (destination != null && knownCategories.add(destination)) categories.add(destination)
+                            pendingImportCategory = null
+                            importInProgress = false
+                            finishImportProgress()
+                            renderChannels()
+                            saveCategorySettings()
+                            persistChannelLibrary()
+                            renderSavedPlaylists()
+                            status.text = "File analizzati: ${uris.size} · Nuovi canali: $added · Duplicati ignorati: $duplicates · File senza canali validi: $invalid"
                         }
                     }
                 }
-                pendingImportCategory = null
-                importInProgress = false
-                finishImportProgress()
-                renderChannels()
-                renderSavedPlaylists()
-                status.text = "File analizzati: ${uris.size} · Nuovi canali: $added · Duplicati ignorati: $duplicates · File senza canali validi: $invalid"
+                importHandler.post(importBatch)
             }
         }.start()
     }
