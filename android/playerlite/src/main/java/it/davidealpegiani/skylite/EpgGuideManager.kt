@@ -93,19 +93,34 @@ internal object EpgGuideManager {
 
     fun formatTime(value: Long): String = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(value))
 
-    fun readCached(context: Context): Map<String, EpgGuide> {
+    /**
+     * Restituisce la cache indicizzata sugli URL correnti, ma la conserva usando
+     * l'identità EPG del canale. In questo modo una rotazione dell'URL dello stream
+     * non fa perdere il programma già associato. Le vecchie cache basate sull'URL
+     * restano leggibili durante la transizione.
+     */
+    fun readCached(context: Context, channels: List<EpgChannelInput>): Map<String, EpgGuide> {
         val raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(GUIDE_CACHE, null) ?: return emptyMap()
         return runCatching {
             val json = JSONObject(raw)
             buildMap {
-                val keys = json.keys()
-                while (keys.hasNext()) {
-                    val url = keys.next()
-                    val item = json.optJSONObject(url) ?: continue
-                    put(url, EpgGuide(item.optString("now"), item.optString("next"), item.optLong("start"), item.optLong("stop"), item.optString("id")))
+                channels.forEach { channel ->
+                    val item = json.optJSONObject(channelCacheKey(channel))
+                        ?: json.optJSONObject(channel.url)
+                        ?: return@forEach
+                    put(channel.url, EpgGuide(item.optString("now"), item.optString("next"), item.optLong("start"), item.optLong("stop"), item.optString("id")))
                 }
             }
         }.getOrDefault(emptyMap())
+    }
+
+    private fun channelCacheKey(channel: EpgChannelInput): String {
+        val id = normalize(channel.tvgId)
+        return if (id.isNotBlank()) {
+            "id:$id"
+        } else {
+            "name:" + normalize(channel.tvgName.ifBlank { channel.name })
+        }
     }
 
     fun refresh(context: Context, channels: List<EpgChannelInput>, customSource: String? = null): EpgRefreshResult {
@@ -175,8 +190,13 @@ internal object EpgGuideManager {
         }
 
         val cache = JSONObject()
-        result.forEach { (url, guide) ->
-            cache.put(url, JSONObject().put("now", guide.nowTitle).put("next", guide.nextTitle).put("start", guide.nowStartMs).put("stop", guide.nowStopMs).put("id", guide.epgId))
+        channels.forEach { channel ->
+            val guide = result[channel.url] ?: return@forEach
+            cache.put(
+                channelCacheKey(channel),
+                JSONObject().put("now", guide.nowTitle).put("next", guide.nextTitle)
+                    .put("start", guide.nowStartMs).put("stop", guide.nowStopMs).put("id", guide.epgId)
+            )
         }
         val signature = channelSignature(channels, customSource)
         val editor = prefs.edit()

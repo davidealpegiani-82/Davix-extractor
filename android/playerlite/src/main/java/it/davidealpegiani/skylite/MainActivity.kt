@@ -1033,7 +1033,7 @@ class MainActivity : Activity() {
     private fun refreshEpgIfNeeded(force: Boolean = false) {
         if (cloudChannels.isEmpty() || epgRefreshInProgress) return
         epgGuides.clear()
-        epgGuides.putAll(EpgGuideManager.readCached(this))
+        epgGuides.putAll(EpgGuideManager.readCached(this, cloudChannels.map { EpgChannelInput(it.name, it.url, it.tvgId, it.tvgName) }))
         val cachedNowCount = epgGuides.values.count { it.nowTitle.isNotBlank() }
         if (cachedNowCount > 0) {
             epgStatusView.text = "EPG disponibile · programmi in onda su $cachedNowCount canali"
