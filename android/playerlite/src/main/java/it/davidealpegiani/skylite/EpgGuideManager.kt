@@ -214,22 +214,8 @@ internal object EpgGuideManager {
         return EpgRefreshResult(result, matched, usedSources.joinToString(" + ").ifBlank { "fonti XMLTV" })
     }
 
-    private fun findMatch(channel: EpgChannelInput, dataset: Dataset, cachedId: String?): String? {
-        val ids = dataset.channelNames.keys
-        if (!cachedId.isNullOrBlank()) ids.firstOrNull { it.equals(cachedId, true) }?.let { return it }
-        if (channel.tvgId.isNotBlank()) ids.firstOrNull { it.equals(channel.tvgId, true) }?.let { return it }
-        val targets = listOf(channel.tvgName, channel.name).map(::normalize).filter { it.isNotBlank() }.distinct()
-        if (targets.isEmpty()) return null
-        val exact = dataset.channelNames.filterValues { names -> names.any { normalize(it) in targets } }.keys.toList()
-        if (exact.size == 1) return exact.first()
-        if (exact.size > 1) return null
-        val scored = dataset.channelNames.map { (id, names) ->
-            id to (names.maxOfOrNull { candidate -> targets.maxOfOrNull { target -> similarity(target, normalize(candidate)) } ?: 0.0 } ?: 0.0)
-        }.sortedByDescending { it.second }
-        val best = scored.firstOrNull() ?: return null
-        val runnerUp = scored.getOrNull(1)?.second ?: 0.0
-        return best.first.takeIf { best.second >= 0.92 && best.second - runnerUp >= 0.10 }
-    }
+    private fun findMatch(channel: EpgChannelInput, dataset: Dataset, cachedId: String?): String? =
+        EpgChannelMatcher.findMatch(channel.tvgId, channel.tvgName, channel.name, dataset.channelNames, cachedId)
 
     private fun channelSignature(channels: List<EpgChannelInput>, customSource: String?): String {
         val channelPart = channels.map { normalize(it.tvgId) + "|" + normalize(it.tvgName.ifBlank { it.name }) }
@@ -242,27 +228,7 @@ internal object EpgGuideManager {
         return channelPart + "\ncustom-epg:" + sourcePart
     }
 
-    private fun normalize(value: String): String = value.lowercase(Locale.ROOT)
-        .replace(Regex("\\b(full|hd|fhd|uhd|4k|hevc|h\\.?265|h\\.?264|1080p|720p|sd)\\b"), " ")
-        .replace(Regex("[^\\p{L}\\p{N}+]+"), " ").trim().replace(Regex("\\s+"), " ")
-
-    private fun similarity(a: String, b: String): Double {
-        if (a.isBlank() || b.isBlank()) return 0.0
-        if (a == b) return 1.0
-        var previous = IntArray(b.length + 1) { it }
-        var current = IntArray(b.length + 1)
-        for (i in a.indices) {
-            current[0] = i + 1
-            for (j in b.indices) {
-                val cost = if (a[i] == b[j]) 0 else 1
-                current[j + 1] = minOf(current[j] + 1, previous[j + 1] + 1, previous[j] + cost)
-            }
-            val swap = previous
-            previous = current
-            current = swap
-        }
-        return 1.0 - previous[b.length].toDouble() / maxOf(a.length, b.length)
-    }
+    private fun normalize(value: String): String = EpgChannelMatcher.normalize(value)
 
     private fun download(address: String): Dataset {
         val connection = (URL(address).openConnection() as HttpURLConnection).apply {
