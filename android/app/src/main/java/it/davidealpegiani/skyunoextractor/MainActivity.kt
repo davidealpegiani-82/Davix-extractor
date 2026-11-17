@@ -11,6 +11,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.util.AtomicFile
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -1840,7 +1841,10 @@ class MainActivity : FragmentActivity() {
     private fun channelLibraryFile(): java.io.File =
         java.io.File(filesDir, "channel_library_v1.json")
 
-    /** Salva canali, selezione export, categorie e cartelle aperte. */
+    private fun channelLibraryAtomicFile(): AtomicFile =
+        AtomicFile(channelLibraryFile())
+
+    /** Salva canali, selezione export, categorie e cartelle aperte in modo atomico. */
     private fun persistChannelLibrary() {
         runCatching {
             val savedChannels = JSONArray()
@@ -1857,23 +1861,35 @@ class MainActivity : FragmentActivity() {
             }
             val expanded = JSONArray().apply { expandedCategoryPaths.forEach { put(it) } }
             val state = JSONObject().apply {
+                // Mantiene il formato v1: gli archivi già presenti restano leggibili.
                 put("version", 1)
                 put("channels", savedChannels)
                 put("expandedCategories", expanded)
                 put("savedAt", System.currentTimeMillis())
             }
-            channelLibraryFile().writeText(state.toString(), StandardCharsets.UTF_8)
+            val atomicFile = channelLibraryAtomicFile()
+            val output = atomicFile.startWrite()
+            try {
+                output.write(state.toString().toByteArray(StandardCharsets.UTF_8))
+                atomicFile.finishWrite(output)
+            } catch (error: Throwable) {
+                atomicFile.failWrite(output)
+                throw error
+            }
         }.onFailure {
-            Log.w("DAVIX-ARCHIVE", "Salvataggio archivio canali non riuscito", it)
+            Log.w("DAVIX-ARCHIVE", "Salvataggio archivio canali non riuscito; la copia precedente viene conservata", it)
         }
     }
 
-    /** Ripristina i canali prima di costruire l’interfaccia. */
+    /** Ripristina i canali prima di costruire l’interfaccia. AtomicFile recupera il backup di una scrittura interrotta. */
     private fun restoreChannelLibrary() {
         val file = channelLibraryFile()
-        if (!file.isFile) return
+        val interruptedWriteBackup = java.io.File(file.path + ".bak")
+        if (!file.isFile && !interruptedWriteBackup.isFile) return
         runCatching {
-            val state = JSONObject(file.readText(StandardCharsets.UTF_8))
+            val state = channelLibraryAtomicFile().openRead().bufferedReader(StandardCharsets.UTF_8).use {
+                JSONObject(it.readText())
+            }
             val savedChannels = state.optJSONArray("channels") ?: JSONArray()
             val restored = mutableListOf<TvChannel>()
             for (i in 0 until savedChannels.length()) {
@@ -1892,6 +1908,7 @@ class MainActivity : FragmentActivity() {
             for (i in 0 until expanded.length()) expanded.optString(i).takeIf { it.isNotBlank() }?.let { expandedCategoryPaths.add(it) }
             Log.i("DAVIX-ARCHIVE", "Ripristinati " + channels.size + " canali dall’archivio locale")
         }.onFailure {
+            // Non cancellare o sovrascrivere un archivio illeggibile: serve per diagnosi e recupero.
             Log.e("DAVIX-ARCHIVE", "Archivio canali non leggibile; file conservato per diagnosi", it)
         }
     }
