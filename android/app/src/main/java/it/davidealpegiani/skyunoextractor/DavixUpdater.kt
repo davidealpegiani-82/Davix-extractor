@@ -87,7 +87,10 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
     }
 
     fun onActivityPaused(activity: Activity) {
-        if (activeActivity === activity) activityResumed = false
+        if (activeActivity === activity) {
+            activityResumed = false
+            stopProgressPolling()
+        }
     }
 
     fun check(activity: Activity) {
@@ -100,12 +103,16 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
         }
 
         // Tutte le interrogazioni a DownloadManager e PackageManager restano su un thread di lavoro.
-        resumePendingInstall(activity)
         executor.execute {
             try {
                 val cleaned = clearCompletedInstallIfApplied()
-                if (cleaned) main.post {
-                    if (activeActivity === activity) dismissDownloadDialog()
+                if (cleaned) {
+                    main.post {
+                        if (activeActivity === activity) dismissDownloadDialog()
+                    }
+                } else {
+                    // Prima si verifica se l'APK già installato ha superato il download pendente.
+                    resumePendingInstall(activity)
                 }
 
                 val now = System.currentTimeMillis()
