@@ -192,7 +192,7 @@ assert.match(kotlin, /put\("category", channel.category\)/, 'Extractor exports e
 assert.match(kotlin, /categories_json/, 'Extractor must persist custom category definitions locally');
 assert.match(template, /category-title/, 'HTML export must visually separate categories');
 assert.match(template, /incomingCategories/, 'HTML player must receive category metadata from Cloud Sync');
-assert.match(template, /config:data.config/, 'HTML player must cache categories together with the channel configuration');
+assert.match(template, /saveCloudState\(\{\.\.\.state,version,config,leaseExpiresAt\}\)/, 'HTML player must cache the fully downloaded categories and channels together');
 assert.match(lite, /addGroupedChannelSections\(/, 'Player Lite must render category sections supplied by Extractor');
 assert.match(lite, /toggleFavorite\(/, 'Player Lite must expose local favorite selection');
 assert.match(lite, /favorite_urls/, 'Player Lite favorites must persist locally');
