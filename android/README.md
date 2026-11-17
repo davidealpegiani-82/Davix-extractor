@@ -87,18 +87,21 @@ Se Cloud Sync non è raggiungibile, Player e HTML mantengono la configurazione l
 
 ## Firma permanente degli APK
 
-Per pubblicare aggiornamenti installabili sopra la versione precedente, entrambi gli APK devono essere firmati sempre con lo stesso keystore. La pipeline supporta una firma release condivisa per Extractor e Player Lite.
+La firma release stabile è attiva nella pipeline GitHub Actions. La build di `main` del **16 novembre 2026**, commit `225f1f1252cab2c9f41e8d43b7616dc58999c8cd`, ha compilato entrambi gli APK, verificato le firme con `apksigner` e pubblicato gli asset nella release stabile.
 
-1. Generare una sola volta un keystore permanente con alias dedicato, ad esempio:
-   `keytool -genkeypair -v -keystore davix-release.jks -alias davix-release -keyalg RSA -keysize 4096 -validity 10000`
-2. Conservare il file `davix-release.jks` e le password in un password manager e in un backup sicuro. Se si perde il keystore, non sarà più possibile aggiornare le installazioni firmate con quella chiave.
-3. Convertire il file in Base64 senza modificarlo. Su PowerShell:
-   `[Convert]::ToBase64String([IO.File]::ReadAllBytes("davix-release.jks"))`
-4. In GitHub aprire **Settings → Secrets and variables → Actions** e creare questi quattro repository secrets:
-   - `DAVIX_KEYSTORE_BASE64`: contenuto Base64 del keystore
-   - `DAVIX_KEYSTORE_PASSWORD`: password del keystore
-   - `DAVIX_KEY_ALIAS`: alias della chiave (es. `davix-release`)
-   - `DAVIX_KEY_PASSWORD`: password della chiave
-5. Le build avviate da push su `main` useranno la firma release. Le build delle pull request non ricevono i segreti e continuano a usare la firma debug. Se la firma permanente non è configurata, le build possono essere prodotte come APK di test, ma **non vengono pubblicate nella release stabile**: una build firmata con una chiave temporanea non sostituisce così gli APK destinati agli aggiornamenti.
+**Certificato verificato su entrambi gli APK della build del 16 novembre 2026:**
 
-**Migrazione iniziale:** le APK pubblicate fino alla configurazione del keystore permanente possono essere firmate con chiavi debug temporanee generate dai runner CI. La release pubblicata il 15 novembre 2026 risulta effettivamente costruita con questa modalità: i segreti di firma permanente non erano configurati. La prima installazione della versione firmata con il nuovo keystore richiederà quindi la disinstallazione della vecchia app, perché Android non consente di aggiornare un'app con una firma diversa. Prima di farlo, esportare o sincronizzare la configurazione e verificare di poterla recuperare. Dopo questa migrazione, gli aggiornamenti firmati sempre con lo stesso keystore potranno essere installati sopra la versione esistente. **Non disinstallare ancora:** prima occorre configurare i quattro repository secrets indicati sopra e pubblicare una build firmata stabilmente.
+`dab3d773daa75228042327408766f0577372b10fefa836849d5c600a90d2fafe`
+
+La pipeline ha riportato la modalità `Release` con firma stabile abilitata; il certificato è RSA 4096 e coincide tra DAVIX Extractor e DAVIX Player Lite. I quattro repository secrets usati dalla pipeline sono:
+
+- `DAVIX_KEYSTORE_BASE64`
+- `DAVIX_KEYSTORE_PASSWORD`
+- `DAVIX_KEY_ALIAS`
+- `DAVIX_KEY_PASSWORD`
+
+Il file keystore e le password non devono essere inseriti nel repository, negli APK o nelle conversazioni. Conservarli in un password manager e in almeno un backup offline sicuro. Non rigenerare la chiave e non sostituire i secrets con un keystore nuovo: una firma diversa impedirebbe ad Android di installare l'aggiornamento sopra l'app esistente.
+
+**Compatibilità degli aggiornamenti:** gli APK pubblicati dalla build del 16 novembre 2026 risultano firmati con il certificato stabile sopra indicato. Le installazioni provenienti da build precedenti firmate con un certificato diverso potrebbero non essere aggiornabili in-place. Prima di qualsiasi disinstallazione o migrazione, verificare la firma dell'APK effettivamente installato e creare un backup/esportazione della configurazione. Non disinstallare DAVIX per tentare di risolvere un errore di aggiornamento senza aver prima verificato firma e recuperabilità dei dati.
+
+La sola compilazione o il successo del workflow non dimostrano che l'installazione OTA sia riuscita su ogni dispositivo: la verifica finale dell'aggiornamento deve includere un test reale su Android.
