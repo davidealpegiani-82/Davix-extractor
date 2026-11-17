@@ -424,6 +424,8 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
 
 
     private fun stopProgressPolling() {
+        // Invalida anche una query già in corso: non deve riprogrammare il polling dopo la chiusura.
+        progressGeneration += 1
         progressRunnable?.let { main.removeCallbacks(it) }
         progressRunnable = null
     }
