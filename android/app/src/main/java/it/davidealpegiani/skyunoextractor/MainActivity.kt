@@ -720,43 +720,63 @@ class MainActivity : FragmentActivity() {
                 updateImportProgress("Analisi completata · classificazione e controllo duplicati…", 85)
                 savePlaylistCopy("playlist-remota.m3u", bytes)
                 runOnUiThread {
-                    if (isFinishing || isDestroyed) return@runOnUiThread
-                    restoreChannelCategories(found)
-                    // Le playlist IPTV possono contenere migliaia di canali.
-                    // Evita ricerche lineari ripetute in "channels" e "categories":
-                    // il precedente controllo channels.any per ogni elemento
-                    // trasformava l'importazione in un'operazione quadratica.
+                    if (isFinishing || isDestroyed) {
+                        importInProgress = false
+                        return@runOnUiThread
+                    }
                     val knownChannelKeys = channels.asSequence()
                         .map { it.name.lowercase(Locale.ROOT) + "|" + it.url }
                         .toHashSet()
                     val knownCategoryPaths = categories.toHashSet()
-                    found.forEach { channel ->
-                        val savedManualPath = normalizeCategoryPath(channel.category)
-                        val inferred = inferCategoryPath(channel)
-                        channel.category = if (savedManualPath.contains(" > ") && savedManualPath in knownCategoryPaths) savedManualPath else inferred
-                        if (knownCategoryPaths.add(channel.category)) categories.add(channel.category)
-                    }
+                    val savedCategoryMapping = runCatching {
+                        JSONObject(categoryPrefs.getString("channel_categories_json", "{}") ?: "{}")
+                    }.getOrDefault(JSONObject())
                     var added = 0
                     var duplicates = 0
-                    found.forEachIndexed { index, channel ->
-                        if (index % 250 == 0) updateImportProgress("Inserimento canali · ${index + 1} / ${found.size}", 85 + (index * 14 / found.size.coerceAtLeast(1)))
-                        val key = channel.name.lowercase(Locale.ROOT) + "|" + channel.url
-                        if (!knownChannelKeys.add(key)) {
-                            duplicates++
-                        } else {
-                            channel.selected = !(channel.name.contains("sky", true) && (channel.name.contains("plus", true) || channel.name.contains("+1")))
-                            channels.add(channel)
-                            if (knownCategoryPaths.add(channel.category)) categories.add(channel.category)
-                            added++
+                    var processed = 0
+                    val batchSize = 200
+                    val importHandler = android.os.Handler(android.os.Looper.getMainLooper())
+                    val importBatch = object : Runnable {
+                        override fun run() {
+                            if (isFinishing || isDestroyed) {
+                                importInProgress = false
+                                return
+                            }
+                            var inBatch = 0
+                            while (processed < found.size && inBatch < batchSize) {
+                                val channel = found[processed]
+                                val savedCategory = savedCategoryMapping.optString(channel.url)
+                                if (savedCategory.isNotBlank()) channel.category = normalizeCategoryPath(savedCategory)
+                                val savedManualPath = normalizeCategoryPath(channel.category)
+                                val inferred = inferCategoryPath(channel)
+                                channel.category = if (savedManualPath.contains(" > ") && savedManualPath in knownCategoryPaths) savedManualPath else inferred
+                                if (knownCategoryPaths.add(channel.category)) categories.add(channel.category)
+                                val key = channel.name.lowercase(Locale.ROOT) + "|" + channel.url
+                                if (!knownChannelKeys.add(key)) {
+                                    duplicates++
+                                } else {
+                                    channel.selected = !(channel.name.contains("sky", true) && (channel.name.contains("plus", true) || channel.name.contains("+1")))
+                                    channels.add(channel)
+                                    added++
+                                }
+                                processed++
+                                inBatch++
+                            }
+                            if (processed < found.size) {
+                                updateImportProgress("Inserimento canali · $processed / ${found.size}", 85 + (processed * 14 / found.size.coerceAtLeast(1)))
+                                importHandler.postDelayed(this, 1L)
+                            } else {
+                                renderChannels()
+                                saveCategorySettings()
+                                persistChannelLibrary()
+                                renderSavedPlaylists()
+                                importInProgress = false
+                                finishImportProgress()
+                                status.text = "Playlist URL analizzata · ${found.size} canali letti · $added nuovi · $duplicates duplicati ignorati."
+                            }
                         }
                     }
-                    renderChannels()
-                    saveCategorySettings()
-                    persistChannelLibrary()
-                    renderSavedPlaylists()
-                    importInProgress = false
-                    finishImportProgress()
-                    status.text = "Playlist URL analizzata · " + found.size + " canali letti · " + added + " nuovi · " + duplicates + " duplicati ignorati."
+                    importHandler.post(importBatch)
                 }
             } catch (e: Exception) {
                 runOnUiThread {
