@@ -29,12 +29,14 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
     private val app = context.applicationContext
     private val prefs = app.getSharedPreferences("davix_app_updater", Context.MODE_PRIVATE)
     private val main = Handler(Looper.getMainLooper())
-    private val executor = Executors.newSingleThreadExecutor()
-    private var activeActivity: Activity? = null
-    private var activeDownloadId = -1L
+    private val executor = Executors.newFixedThreadPool(2)
+    @Volatile private var activeActivity: Activity? = null
+    @Volatile private var activeDownloadId = -1L
     private var receiverRegistered = false
     private var checkedThisProcess = false
-    private var activityResumed = false
+    @Volatile private var activityResumed = false
+    private var progressGeneration = 0
+    private var downloadStartInProgress = false
     private var downloadDialog: AlertDialog? = null
     private var downloadProgress: ProgressBar? = null
     private var downloadStatus: TextView? = null
@@ -45,34 +47,38 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
             if (intent.action != DownloadManager.ACTION_DOWNLOAD_COMPLETE) return
             val id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L)
             if (id != prefs.getLong("pending_download_id", -1L)) return
-            val manager = app.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-            manager.query(DownloadManager.Query().setFilterById(id)).use { cursor ->
-                if (!cursor.moveToFirst()) return
-                val status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+
+            // DownloadManager è un servizio Binder: non interrogare il servizio dal receiver/main thread.
+            executor.execute {
+                val status = runCatching {
+                    val manager = app.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+                    manager.query(DownloadManager.Query().setFilterById(id)).use { cursor ->
+                        if (cursor.moveToFirst()) cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)) else null
+                    }
+                }.getOrNull() ?: return@execute
+
                 if (status == DownloadManager.STATUS_SUCCESSFUL) {
                     prefs.edit().putBoolean("download_completed", true).apply()
-                    main.post {
-                        stopProgressPolling()
-                        val current = activeActivity
-                        if (activityResumed && current != null && !current.isFinishing && !current.isDestroyed) {
-                            showInstallReadyDialog(current)
-                        }
-                    }
-                } else {
-                    main.post {
-                        stopProgressPolling()
+                }
+                main.post {
+                    if (id != prefs.getLong("pending_download_id", -1L)) return@post
+                    stopProgressPolling()
+                    val current = activeActivity
+                    if (!activityResumed || current == null || current.isFinishing || current.isDestroyed) return@post
+                    if (status == DownloadManager.STATUS_SUCCESSFUL) {
+                        showInstallReadyDialog(current)
+                    } else {
                         dismissDownloadDialog()
-                        val current = activeActivity
-                        if (activityResumed && current != null && !current.isFinishing && !current.isDestroyed) {
-                            AlertDialog.Builder(current).setTitle("Download non riuscito")
-                                .setMessage("Non è stato possibile scaricare l'aggiornamento. Controlla la connessione e riprova.")
-                                .setPositiveButton("OK", null).show()
-                        }
+                        AlertDialog.Builder(current).setTitle("Download non riuscito")
+                            .setMessage("Non è stato possibile scaricare l'aggiornamento. Controlla la connessione e riprova.")
+                            .setPositiveButton("OK", null).show()
                     }
                 }
             }
         }
     }
+
+
 
     fun onActivityResumed(activity: Activity) {
         activeActivity = activity
@@ -86,12 +92,6 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
 
     fun check(activity: Activity) {
         activeActivity = activity
-        clearCompletedInstallIfApplied()
-        // Se un download precedente è terminato mentre DAVIX era chiuso,
-        // riprende qui la procedura di installazione Android.
-        resumePendingInstall(activity)
-
-        activeDownloadId = prefs.getLong("pending_download_id", -1L)
         if (!receiverRegistered) {
             val filter = IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE)
             if (Build.VERSION.SDK_INT >= 33) app.registerReceiver(downloadReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
@@ -99,22 +99,31 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
             receiverRegistered = true
         }
 
-        // Controllo ad ogni ritorno in primo piano, con intervallo minimo di 30 minuti.
-        val now = System.currentTimeMillis()
-        val lastCheck = prefs.getLong("last_version_check_at", 0L)
-        if (now - lastCheck < CHECK_INTERVAL_MS || hasPendingDownload()) return
-        prefs.edit().putLong("last_version_check_at", now).apply()
-
+        // Tutte le interrogazioni a DownloadManager e PackageManager restano su un thread di lavoro.
+        resumePendingInstall(activity)
         executor.execute {
             try {
+                val cleaned = clearCompletedInstallIfApplied()
+                if (cleaned) main.post {
+                    if (activeActivity === activity) dismissDownloadDialog()
+                }
+
+                val now = System.currentTimeMillis()
+                val lastCheck = prefs.getLong("last_version_check_at", 0L)
+                if (now - lastCheck < CHECK_INTERVAL_MS || hasPendingDownload()) return@execute
+                prefs.edit().putLong("last_version_check_at", now).apply()
+
                 val connection = (URL(MANIFEST_URL).openConnection() as HttpURLConnection).apply {
                     connectTimeout = 12000
                     readTimeout = 12000
                     setRequestProperty("Accept", "application/json")
                     setRequestProperty("Cache-Control", "no-cache")
                 }
-                val manifest = connection.inputStream.bufferedReader().use { it.readText() }
-                connection.disconnect()
+                val manifest = try {
+                    connection.inputStream.bufferedReader().use { it.readText() }
+                } finally {
+                    connection.disconnect()
+                }
                 val item = JSONObject(manifest).getJSONObject(appKey)
                 val latestCode = item.getLong("versionCode")
                 val latestName = item.getString("versionName")
@@ -131,8 +140,6 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
                     main.post {
                         val current = activeActivity ?: return@post
                         if (!activityResumed || current.isFinishing || current.isDestroyed) return@post
-                        // Il pacchetto viene scaricato automaticamente. Android mostrerà
-                        // comunque la propria schermata di conferma per l'installazione.
                         Toast.makeText(
                             current,
                             "DAVIX $latestName disponibile: download automatico avviato",
@@ -142,21 +149,19 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
                     }
                 }
             } catch (_: Exception) {
-                // Il controllo aggiornamenti è non bloccante: DAVIX resta utilizzabile offline.
-                // In caso di errore riproverà al prossimo controllo utile.
                 prefs.edit().putLong("last_version_check_at", 0L).apply()
             }
         }
     }
 
+
+
     // Dopo un'installazione riuscita il processo riparte con il nuovo versionCode.
     // In quel momento si elimina lo stato del vecchio download, altrimenti il suo
     // STATUS_SUCCESSFUL verrebbe interpretato come download ancora pendente per sempre.
-    private fun clearCompletedInstallIfApplied() {
-        // La versione installata è la fonte di verità: può essere stata aggiornata
-        // anche se Android ha interrotto DAVIX prima del salvataggio installer_launched.
+    private fun clearCompletedInstallIfApplied(): Boolean {
         val targetCode = prefs.getLong("pending_version_code", -1L)
-        if (targetCode <= 0L) return
+        if (targetCode <= 0L) return false
         val currentCode = runCatching {
             val info = app.packageManager.getPackageInfo(app.packageName, 0)
             if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else {
@@ -164,28 +169,29 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
                 info.versionCode.toLong()
             }
         }.getOrDefault(0L)
-        if (currentCode >= targetCode) {
-            // Rimuove anche un eventuale DownloadManager ancora in PENDING/RUNNING:
-            // non deve essere riproposto dopo che la versione richiesta è già installata.
-            val staleId = prefs.getLong("pending_download_id", -1L)
-            if (staleId > 0L) {
-                runCatching {
-                    (app.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).remove(staleId)
-                }
+        if (currentCode < targetCode) return false
+
+        // La versione installata è la fonte di verità; rimuove eventuali download residui.
+        val staleId = prefs.getLong("pending_download_id", -1L)
+        if (staleId > 0L) {
+            runCatching {
+                (app.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).remove(staleId)
             }
-            prefs.edit()
-                .remove("pending_download_id")
-                .remove("pending_apk_path")
-                .remove("pending_version_code")
-                .putBoolean("installer_launched", false)
-                .putBoolean("download_completed", false)
-                .putBoolean("awaiting_install_permission", false)
-                .putLong("last_version_check_at", 0L)
-                .apply()
-            activeDownloadId = -1L
-            dismissDownloadDialog()
         }
+        prefs.edit()
+            .remove("pending_download_id")
+            .remove("pending_apk_path")
+            .remove("pending_version_code")
+            .putBoolean("installer_launched", false)
+            .putBoolean("download_completed", false)
+            .putBoolean("awaiting_install_permission", false)
+            .putLong("last_version_check_at", 0L)
+            .apply()
+        activeDownloadId = -1L
+        return true
     }
+
+
 
     private fun hasPendingDownload(): Boolean {
         val id = prefs.getLong("pending_download_id", -1L)
@@ -268,30 +274,43 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
     }
 
     private fun downloadUpdate(activity: Activity, versionName: String, apkUrl: String, versionCode: Long) {
-        try {
-            val fileName = "DAVIX-$appKey-$versionName.apk"
-            val request = DownloadManager.Request(Uri.parse(apkUrl))
-                .setTitle("Aggiornamento DAVIX")
-                .setDescription("Download versione $versionName")
-                .setMimeType("application/vnd.android.package-archive")
-                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                .setDestinationInExternalFilesDir(app, Environment.DIRECTORY_DOWNLOADS, fileName)
-            val manager = app.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-            val id = manager.enqueue(request)
-            activeDownloadId = id
-            val destination = File(app.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), fileName)
-            prefs.edit().putLong("pending_download_id", id)
-                .putString("pending_apk_path", destination.absolutePath)
-                .putLong("pending_version_code", versionCode)
-                .putBoolean("installer_launched", false)
-                .putBoolean("download_completed", false).apply()
-            showDownloadProgress(activity, id, versionName)
-        } catch (_: Exception) {
-            AlertDialog.Builder(activity).setTitle("Download non avviato")
-                .setMessage("Non è stato possibile avviare il download dell'aggiornamento. Riprova.")
-                .setPositiveButton("OK", null).show()
+        if (downloadStartInProgress) return
+        downloadStartInProgress = true
+        executor.execute {
+            try {
+                val fileName = "DAVIX-$appKey-$versionName.apk"
+                val request = DownloadManager.Request(Uri.parse(apkUrl))
+                    .setTitle("Aggiornamento DAVIX")
+                    .setDescription("Download versione $versionName")
+                    .setMimeType("application/vnd.android.package-archive")
+                    .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                    .setDestinationInExternalFilesDir(app, Environment.DIRECTORY_DOWNLOADS, fileName)
+                val manager = app.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+                val id = manager.enqueue(request)
+                val destination = File(app.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), fileName)
+                prefs.edit().putLong("pending_download_id", id)
+                    .putString("pending_apk_path", destination.absolutePath)
+                    .putLong("pending_version_code", versionCode)
+                    .putBoolean("installer_launched", false)
+                    .putBoolean("download_completed", false).apply()
+                main.post {
+                    downloadStartInProgress = false
+                    if (!activity.isFinishing && !activity.isDestroyed) showDownloadProgress(activity, id, versionName)
+                }
+            } catch (_: Exception) {
+                main.post {
+                    downloadStartInProgress = false
+                    if (!activity.isFinishing && !activity.isDestroyed) {
+                        AlertDialog.Builder(activity).setTitle("Download non avviato")
+                            .setMessage("Non è stato possibile avviare il download dell'aggiornamento. Riprova.")
+                            .setPositiveButton("OK", null).show()
+                    }
+                }
+            }
         }
     }
+
+
 
     private fun showDownloadProgress(activity: Activity, downloadId: Long, versionName: String) {
         if (activity.isFinishing || activity.isDestroyed) return
@@ -320,15 +339,31 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
 
     private fun startProgressPolling(downloadId: Long) {
         stopProgressPolling()
+        val generation = progressGeneration
         val task = object : Runnable {
             override fun run() {
-                val manager = app.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-                try {
-                    manager.query(DownloadManager.Query().setFilterById(downloadId)).use { cursor ->
-                        if (!cursor.moveToFirst()) return
-                        val status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
-                        val downloaded = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR))
-                        val total = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES))
+                // La query Binder viene eseguita in background; il main thread aggiorna soltanto le View.
+                executor.execute {
+                    val snapshot: Triple<Int, Long, Long>? = runCatching {
+                        val manager = app.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+                        manager.query(DownloadManager.Query().setFilterById(downloadId)).use { cursor ->
+                            if (!cursor.moveToFirst()) null else Triple(
+                                cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)),
+                                cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)),
+                                cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES))
+                            )
+                        }
+                    }.getOrNull()
+
+                    main.post {
+                        if (generation != progressGeneration) return@post
+                        if (snapshot == null) {
+                            downloadStatus?.text = "Verifica dello stato del download…"
+                            main.postDelayed(this, 1500L)
+                            return@post
+                        }
+
+                        val (status, downloaded, total) = snapshot
                         when (status) {
                             DownloadManager.STATUS_PENDING -> {
                                 downloadStatus?.text = "In attesa di avvio del download…"
@@ -352,36 +387,34 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
                             DownloadManager.STATUS_SUCCESSFUL -> {
                                 stopProgressPolling()
                                 prefs.edit().putBoolean("download_completed", true).apply()
-                                main.post {
-                                    val current = activeActivity
-                                    if (activityResumed && current != null && !current.isFinishing && !current.isDestroyed) showInstallReadyDialog(current)
+                                val current = activeActivity
+                                if (activityResumed && current != null && !current.isFinishing && !current.isDestroyed) {
+                                    showInstallReadyDialog(current)
                                 }
-                                return
+                                return@post
                             }
                             DownloadManager.STATUS_FAILED -> {
                                 stopProgressPolling()
-                                main.post {
-                                    dismissDownloadDialog()
-                                    val current = activeActivity
-                                    if (current != null && !current.isFinishing && !current.isDestroyed) {
-                                        AlertDialog.Builder(current).setTitle("Download non riuscito")
-                                            .setMessage("Il download dell'APK non è riuscito. Controlla la connessione e riprova.")
-                                            .setPositiveButton("OK", null).show()
-                                    }
+                                dismissDownloadDialog()
+                                val current = activeActivity
+                                if (current != null && !current.isFinishing && !current.isDestroyed) {
+                                    AlertDialog.Builder(current).setTitle("Download non riuscito")
+                                        .setMessage("Il download dell'APK non è riuscito. Controlla la connessione e riprova.")
+                                        .setPositiveButton("OK", null).show()
                                 }
-                                return
+                                return@post
                             }
                         }
+                        main.postDelayed(this, 1500L)
                     }
-                } catch (_: Exception) {
-                    downloadStatus?.text = "Verifica dello stato del download…"
                 }
-                main.postDelayed(this, 400L)
             }
         }
         progressRunnable = task
         main.post(task)
     }
+
+
 
     private fun stopProgressPolling() {
         progressRunnable?.let { main.removeCallbacks(it) }
@@ -415,20 +448,32 @@ internal class DavixUpdater(context: Context, private val appKey: String) {
         if (prefs.getBoolean("installer_launched", false)) return
         val id = prefs.getLong("pending_download_id", -1L)
         if (id <= 0L) return
-        val manager = app.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-        manager.query(DownloadManager.Query().setFilterById(id)).use { cursor ->
-            if (!cursor.moveToFirst()) return
-            when (cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))) {
-                DownloadManager.STATUS_PENDING, DownloadManager.STATUS_RUNNING, DownloadManager.STATUS_PAUSED ->
-                    showDownloadProgress(activity, id, "in corso")
-                DownloadManager.STATUS_SUCCESSFUL -> {
-                    prefs.edit().putBoolean("download_completed", true).apply()
-                    showInstallReadyDialog(activity)
+
+        executor.execute {
+            val status = runCatching {
+                val manager = app.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+                manager.query(DownloadManager.Query().setFilterById(id)).use { cursor ->
+                    if (cursor.moveToFirst()) cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)) else null
                 }
-                else -> prefs.edit().remove("pending_download_id").remove("pending_apk_path").apply()
+            }.getOrNull() ?: return@execute
+
+            main.post {
+                if (activeActivity !== activity || !activityResumed || activity.isFinishing || activity.isDestroyed) return@post
+                when (status) {
+                    DownloadManager.STATUS_PENDING, DownloadManager.STATUS_RUNNING, DownloadManager.STATUS_PAUSED ->
+                        showDownloadProgress(activity, id, "in corso")
+                    DownloadManager.STATUS_SUCCESSFUL -> {
+                        prefs.edit().putBoolean("download_completed", true).apply()
+                        showInstallReadyDialog(activity)
+                    }
+                    else -> prefs.edit().remove("pending_download_id").remove("pending_apk_path")
+                        .remove("pending_version_code").apply()
+                }
             }
         }
     }
+
+
 
     private fun dp(context: Context, value: Int): Int =
         (value * context.resources.displayMetrics.density).toInt()
