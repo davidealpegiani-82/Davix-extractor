@@ -23,3 +23,5 @@ jobs:
           node-version: "22"
       - name: Verify player template and category flows
         run: node android/scripts/verify-player-template.mjs
+      - name: Verify updater background I/O
+        run: node android/scripts/verify-updater-background.mjs
