@@ -167,13 +167,17 @@ internal object EpgGuideManager {
             }
             if (channelCandidates.isEmpty()) continue
 
-            // Unisce i palinsesti: Sky Italia resta prioritaria, le altre fonti
-            // riempiono i buchi. A parità di fascia oraria vince la prima fonte.
-            val mergedPrograms = channelCandidates.flatMap { it.third }
-                .sortedWith(compareBy<Program> { it.start }.thenBy { it.stop })
-                .distinctBy { it.start to it.stop }
-            val current = mergedPrograms.firstOrNull { it.start <= now && it.stop > now }
-            val next = mergedPrograms.firstOrNull { it.start > now }
+            // Mantiene la priorità delle fonti: il palinsesto personalizzato
+            // e poi Sky prevalgono; le altre fonti riempiono soltanto gli intervalli
+            // realmente mancanti, senza introdurre programmi sovrapposti.
+            val selection = EpgProgrammeMerger.select(
+                channelCandidates.map { (_, _, programmes) ->
+                    programmes.map { EpgProgramme(it.start, it.stop, it.title) }
+                },
+                now
+            )
+            val current = selection.current
+            val next = selection.next
 
             channelCandidates.forEach { (label, _, _) -> usedSources.add(label) }
             val preferredId = channelCandidates.firstOrNull { it.first == "XMLTV personalizzato" }?.second
