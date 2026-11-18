@@ -763,8 +763,10 @@ class MainActivity : FragmentActivity() {
                                 val savedCategory = savedCategoryMapping.optString(channel.url)
                                 if (savedCategory.isNotBlank()) channel.category = normalizeCategoryPath(savedCategory)
                                 val savedManualPath = normalizeCategoryPath(channel.category)
-                                val inferred = inferCategoryPath(channel)
-                                channel.category = if (savedManualPath.contains(" > ") && savedManualPath in knownCategoryPaths) savedManualPath else inferred
+                                val inferred = inferUrlCategoryPath(channel)
+                                channel.category = if (savedManualPath.startsWith("LIVE > ") || savedManualPath.startsWith("VOD > ")) {
+                                    if (savedManualPath in knownCategoryPaths) savedManualPath else inferred
+                                } else inferred
                                 if (knownCategoryPaths.add(channel.category)) categories.add(channel.category)
                                 val key = channel.name.lowercase(Locale.ROOT) + "|" + channel.url
                                 if (!knownChannelKeys.add(key)) {
@@ -1250,6 +1252,79 @@ class MainActivity : FragmentActivity() {
      * Le regole sono volutamente conservative: ciò che non è riconoscibile
      * finisce in "Da classificare", senza essere assegnato a una categoria casuale.
      */
+    /**
+     * Classificazione dedicata alle playlist remote: prima identifica il tipo
+     * di contenuto (LIVE / VOD-FILM / VOD-SERIE), poi assegna una categoria
+     * semantica compatta. Il group-title è un indizio, non viene copiato alla
+     * cieca come cartella: spesso i provider generano decine di varianti.
+     */
+    private fun inferUrlCategoryPath(channel: TvChannel): String {
+        val group = channel.category.lowercase(Locale.ROOT)
+            .replace('_', ' ').replace('-', ' ').replace('|', ' ')
+        val name = channel.name.lowercase(Locale.ROOT)
+            .replace('_', ' ').replace('-', ' ')
+        val url = channel.url.lowercase(Locale.ROOT)
+        val path = runCatching { Uri.parse(channel.url).path.orEmpty().lowercase(Locale.ROOT) }.getOrDefault("")
+        val source = "$group $name"
+        fun has(vararg terms: String) = terms.any { source.contains(it) }
+        fun token(vararg terms: String) = terms.any { Regex("(^|[^a-z0-9])" + Regex.escape(it) + "([^a-z0-9]|$)").containsMatchIn(source) }
+
+        val seriesHint = path.contains("/series/") ||
+            has("serie tv", "series", "tv series", "season", "stagione", "episodio", "episode", "anime", "cartoni")
+        val movieHint = path.contains("/movie/") || path.contains("/movies/") ||
+            has("film", "films", "movie", "movies", "cinema", "vod film")
+        val vodExtension = Regex("\\.(mp4|mkv|avi|mov|m4v|wmv|webm)(?:$|[?&])").containsMatchIn(url)
+        val liveHint = path.contains("/live/") ||
+            Regex("\\.(ts|m3u8)(?:$|[?&])").containsMatchIn(url) ||
+            has("live tv", "canali live", "tv live", "iptv live")
+        val explicitVod = path.contains("/vod/") || has("vod", "video on demand", "on demand")
+        val isVod = !liveHint && (seriesHint || movieHint || vodExtension || explicitVod)
+
+        if (isVod) {
+            val isSeries = seriesHint || (explicitVod && !movieHint && !vodExtension)
+            val genre = when {
+                has("azione", "action", "adventure", "avventura", "martial arts") -> "Azione e Avventura"
+                has("commedia", "comedy", "comico") -> "Commedia"
+                has("drama", "drammatico", "dramatic", "fiction") -> "Drammatico"
+                has("crime", "poliziesco", "investig", "detective", "gangster") -> "Crime e Poliziesco"
+                has("thriller", "suspense", "mystery", "mistero") -> "Thriller e Mistero"
+                has("horror", "terror") -> "Horror"
+                has("fantascienza", "sci fi", "sci-fi", "science fiction", "fantasy", "fantasy") -> "Fantascienza e Fantasy"
+                has("romance", "romantico", "romantici", "romantic") -> "Romantici"
+                has("animation", "animazione", "anime", "cartoon", "cartoni") -> "Animazione e Anime"
+                has("documentary", "documentario", "documentari", "docu") -> "Documentari"
+                has("family", "famiglia", "kids", "bambini") -> "Famiglia e Bambini"
+                has("war", "guerra", "history", "storico", "storia") -> "Storici e Guerra"
+                has("western") -> "Western"
+                has("music", "musical", "musica", "concert") -> "Musicali"
+                has("reality", "show", "talent") -> "Reality e Show"
+                has("italian", "italiano", "italiani", "italia") -> "Produzioni Italiane"
+                has("english", "international", "internazionale") -> "Internazionali"
+                else -> if (isSeries) "Altre serie" else "Altri film"
+            }
+            return if (isSeries) "VOD > SERIE > $genre" else "VOD > FILM > $genre"
+        }
+
+        val liveCategory = when {
+            has("xxx", "adult", "adulti", "erotic") -> "Adult"
+            has("calcio", "football", "soccer", "serie a", "serie b", "champions league", "europa league", "conference league", "premier league", "bundesliga", "ligue 1", "coppa italia") -> "Sport > Calcio"
+            has("formula 1", "formula1", "motogp", "moto gp", "superbike", "wrc", "rally", "nascar", "motori") -> "Sport > Motori"
+            has("tennis", "atp", "wta", "roland garros", "wimbledon") -> "Sport > Tennis"
+            has("basket", "basketball", "nba", "euroleague") -> "Sport > Basket"
+            has("sport", "dazn", "eurosport", "sky sport", "sportitalia", "golf", "rugby", "volley", "pallavolo", "ciclismo", "olimpiadi") -> "Sport > Altri sport"
+            has("news", "notizie", "rai news", "sky tg", "tgcom", "bbc", "cnn", "al jazeera", "france 24", "euronews") -> "News"
+            has("documentar", "discovery", "national geographic", "nat geo", "history channel", "wildlife", "natura", "focus") -> "Documentari"
+            has("cartoon", "cartoni", "boing", "k2", "nickelodeon", "cartoonito", "disney junior", "kids", "bambini") -> "Bambini"
+            has("music", "musica", "mtv", "concert", "radio") -> "Musica"
+            has("regional", "regionale", "local tv", "telelombardia", "telecity", "telenova") -> "Regionali"
+            has("rai 1", "rai 2", "rai 3", "canale 5", "italia 1", "rete 4", "la7", "nove", "tv8", "real time", "dmax", "general", "entertainment", "intrattenimento", "reality", "masterchef", "x factor") -> "Intrattenimento"
+            has("cinema", "sky cinema", "paramount", "film channel", "movie channel") -> "Cinema"
+            has("international", "internazional", "world", "estero", "foreign") -> "Internazionali"
+            else -> "Altri canali"
+        }
+        return "LIVE > $liveCategory"
+    }
+
     private fun inferCategoryPath(channel: TvChannel): String {
         val source = "${channel.name} ${channel.category}".lowercase(Locale.ROOT)
             .replace('_', ' ').replace('-', ' ')
