@@ -7,8 +7,8 @@ const playerGradle = readFileSync("android/playerlite/build.gradle.kts", "utf8")
 assert.match(workflow, /Prepare automatic app versions/, "release workflow must prepare versions for both apps");
 assert.match(workflow, /\("extractor", "DAVIX_EXTRACTOR"\)/, "Extractor version must be incremented");
 assert.match(workflow, /\("player", "DAVIX_PLAYER"\)/, "Player version must be incremented");
-assert.match(workflow, /DAVIX_PLAYER_VERSION_CODE/, "Player versionCode must be exported to Gradle");
-assert.match(workflow, /DAVIX_PLAYER_VERSION_NAME/, "Player versionName must be exported to Gradle");
+assert.match(workflow, /print\(f"\{prefix\}_VERSION_CODE=/, "Both generated versionCodes must be exported through GITHUB_ENV");
+assert.match(workflow, /print\(f"\{prefix\}_VERSION_NAME=/, "Both generated versionNames must be exported through GITHUB_ENV");
 assert.match(playerGradle, /System\.getenv\("DAVIX_PLAYER_VERSION_CODE"\)/, "Player Gradle config must consume CI versionCode");
 assert.match(playerGradle, /System\.getenv\("DAVIX_PLAYER_VERSION_NAME"\)/, "Player Gradle config must consume CI versionName");
 assert.match(playerGradle, /versionCode = playerVersionCode/, "Player APK must use the generated versionCode");
