@@ -1277,7 +1277,7 @@ class MainActivity : FragmentActivity() {
         val liveHint = path.contains("/live/") ||
             Regex("\\.(ts|m3u8)(?:$|[?&])").containsMatchIn(url) ||
             has("live tv", "canali live", "tv live", "iptv live")
-        val explicitVod = path.contains("/vod/") || has("vod", "video on demand", "on demand")
+        val explicitVod = path.contains("/vod/") || token("vod") || has("video on demand", "on demand")
         val isVod = !liveHint && (seriesHint || movieHint || vodExtension || explicitVod)
 
         if (isVod) {
