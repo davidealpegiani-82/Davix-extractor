@@ -29,6 +29,8 @@ jobs:
         run: node android/scripts/verify-player-template.mjs
       - name: Verify import memory retention
         run: node android/scripts/verify-import-memory.mjs
+      - name: Verify hierarchical URL categories
+        run: node android/scripts/verify-url-categories.mjs
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
