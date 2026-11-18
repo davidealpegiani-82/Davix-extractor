@@ -739,15 +739,21 @@ class MainActivity : FragmentActivity() {
                         importInProgress = false
                         return@runOnUiThread
                     }
-                    val knownChannelKeys = channels.asSequence()
-                        .map { it.name.lowercase(Locale.ROOT) + "|" + it.url }
-                        .toHashSet()
+                    val existingChannelsByKey = channels.associateBy {
+                        it.name.lowercase(Locale.ROOT) + "|" + it.url
+                    }
+                    val knownChannelKeys = existingChannelsByKey.keys.toHashSet()
                     val knownCategoryPaths = categories.toHashSet()
+                    val legacyAutoCategoryPrefixes = listOf(
+                        "Sport", "Cinema", "Serie TV", "Documentari", "Bambini",
+                        "News", "Musica", "Intrattenimento", "XXX"
+                    )
                     val savedCategoryMapping = runCatching {
                         JSONObject(categoryPrefs.getString("channel_categories_json", "{}") ?: "{}")
                     }.getOrDefault(JSONObject())
                     var added = 0
                     var duplicates = 0
+                    var reorganized = 0
                     var processed = 0
                     val batchSize = 200
                     val importHandler = android.os.Handler(android.os.Looper.getMainLooper())
@@ -771,6 +777,15 @@ class MainActivity : FragmentActivity() {
                                 val key = channel.name.lowercase(Locale.ROOT) + "|" + channel.url
                                 if (!knownChannelKeys.add(key)) {
                                     duplicates++
+                                    val existing = existingChannelsByKey[key]
+                                    val oldPath = normalizeCategoryPath(existing?.category.orEmpty())
+                                    val wasAutomaticallyClassified = oldPath == "Da classificare" ||
+                                        oldPath == "Non classificati" ||
+                                        legacyAutoCategoryPrefixes.any { oldPath == it || oldPath.startsWith("$it > ") }
+                                    if (existing != null && wasAutomaticallyClassified && existing.category != channel.category) {
+                                        existing.category = channel.category
+                                        reorganized++
+                                    }
                                 } else {
                                     channel.selected = !(channel.name.contains("sky", true) && (channel.name.contains("plus", true) || channel.name.contains("+1")))
                                     channels.add(channel)
@@ -789,7 +804,7 @@ class MainActivity : FragmentActivity() {
                                 renderSavedPlaylists()
                                 importInProgress = false
                                 finishImportProgress()
-                                status.text = "Playlist URL analizzata · ${found.size} canali letti · $added nuovi · $duplicates duplicati ignorati."
+                                status.text = "Playlist URL analizzata · ${found.size} canali letti · $added nuovi · $reorganized riclassificati · $duplicates già presenti."
                             }
                         }
                     }
