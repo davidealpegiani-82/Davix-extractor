@@ -8,6 +8,9 @@ assert.ok(urlImportStart >= 0 && urlImportEnd > urlImportStart, "Remote URL impo
 const urlImport = source.slice(urlImportStart, urlImportEnd);
 assert.ok(urlImport.includes("inferUrlCategoryPath(channel)"), "Remote URL imports must use the hierarchical content classifier");
 assert.ok(!urlImport.includes("inferCategoryPath(channel)"), "Remote URL imports must not use the legacy flat classifier");
+assert.ok(urlImport.includes("legacyAutoCategoryPrefixes"), "Existing automatic categories must be identified for safe reorganization");
+assert.ok(urlImport.includes("existing.category = channel.category"), "Reimporting a URL playlist must migrate existing automatically classified channels");
+assert.ok(urlImport.includes("reorganized++"), "The import report must count channels reorganized");
 
 const classifierStart = source.indexOf("private fun inferUrlCategoryPath(channel: TvChannel)");
 const classifierEnd = source.indexOf("private fun inferCategoryPath(channel: TvChannel)", classifierStart);
