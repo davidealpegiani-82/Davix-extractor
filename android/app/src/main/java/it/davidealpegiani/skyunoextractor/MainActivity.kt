@@ -58,6 +58,17 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.StandardCharsets
 import java.util.Locale
+import java.util.concurrent.Executors
+
+private data class ChannelArchiveEntry(
+    val name: String,
+    val url: String,
+    val logo: String,
+    val selected: Boolean,
+    val category: String,
+    val tvgId: String,
+    val tvgName: String
+)
 
 data class TvChannel(
     val name: String,
@@ -72,6 +83,10 @@ data class TvChannel(
 @OptIn(UnstableApi::class)
 class MainActivity : FragmentActivity() {
     private val channels = mutableListOf<TvChannel>()
+    // Un solo writer seriale: impedisce che snapshot più vecchi finiscano su disco dopo quelli recenti.
+    private val archiveExecutor = Executors.newSingleThreadExecutor { task ->
+        Thread(task, "DAVIX-Archive").apply { isDaemon = true }
+    }
     private val categories = mutableListOf("Intrattenimento", "Sport", "Cinema", "Documentari", "Musica", "XXX", "Non classificati")
     private val categoryPrefs by lazy { getSharedPreferences("davix_extractor_categories", MODE_PRIVATE) }
     // Selezione multipla separata dalla selezione di esportazione.
@@ -720,43 +735,63 @@ class MainActivity : FragmentActivity() {
                 updateImportProgress("Analisi completata · classificazione e controllo duplicati…", 85)
                 savePlaylistCopy("playlist-remota.m3u", bytes)
                 runOnUiThread {
-                    if (isFinishing || isDestroyed) return@runOnUiThread
-                    restoreChannelCategories(found)
-                    // Le playlist IPTV possono contenere migliaia di canali.
-                    // Evita ricerche lineari ripetute in "channels" e "categories":
-                    // il precedente controllo channels.any per ogni elemento
-                    // trasformava l'importazione in un'operazione quadratica.
+                    if (isFinishing || isDestroyed) {
+                        importInProgress = false
+                        return@runOnUiThread
+                    }
                     val knownChannelKeys = channels.asSequence()
                         .map { it.name.lowercase(Locale.ROOT) + "|" + it.url }
                         .toHashSet()
                     val knownCategoryPaths = categories.toHashSet()
-                    found.forEach { channel ->
-                        val savedManualPath = normalizeCategoryPath(channel.category)
-                        val inferred = inferCategoryPath(channel)
-                        channel.category = if (savedManualPath.contains(" > ") && savedManualPath in knownCategoryPaths) savedManualPath else inferred
-                        if (knownCategoryPaths.add(channel.category)) categories.add(channel.category)
-                    }
+                    val savedCategoryMapping = runCatching {
+                        JSONObject(categoryPrefs.getString("channel_categories_json", "{}") ?: "{}")
+                    }.getOrDefault(JSONObject())
                     var added = 0
                     var duplicates = 0
-                    found.forEachIndexed { index, channel ->
-                        if (index % 250 == 0) updateImportProgress("Inserimento canali · ${index + 1} / ${found.size}", 85 + (index * 14 / found.size.coerceAtLeast(1)))
-                        val key = channel.name.lowercase(Locale.ROOT) + "|" + channel.url
-                        if (!knownChannelKeys.add(key)) {
-                            duplicates++
-                        } else {
-                            channel.selected = !(channel.name.contains("sky", true) && (channel.name.contains("plus", true) || channel.name.contains("+1")))
-                            channels.add(channel)
-                            if (knownCategoryPaths.add(channel.category)) categories.add(channel.category)
-                            added++
+                    var processed = 0
+                    val batchSize = 200
+                    val importHandler = android.os.Handler(android.os.Looper.getMainLooper())
+                    val importBatch = object : Runnable {
+                        override fun run() {
+                            if (isFinishing || isDestroyed) {
+                                importInProgress = false
+                                return
+                            }
+                            var inBatch = 0
+                            while (processed < found.size && inBatch < batchSize) {
+                                val channel = found[processed]
+                                val savedCategory = savedCategoryMapping.optString(channel.url)
+                                if (savedCategory.isNotBlank()) channel.category = normalizeCategoryPath(savedCategory)
+                                val savedManualPath = normalizeCategoryPath(channel.category)
+                                val inferred = inferCategoryPath(channel)
+                                channel.category = if (savedManualPath.contains(" > ") && savedManualPath in knownCategoryPaths) savedManualPath else inferred
+                                if (knownCategoryPaths.add(channel.category)) categories.add(channel.category)
+                                val key = channel.name.lowercase(Locale.ROOT) + "|" + channel.url
+                                if (!knownChannelKeys.add(key)) {
+                                    duplicates++
+                                } else {
+                                    channel.selected = !(channel.name.contains("sky", true) && (channel.name.contains("plus", true) || channel.name.contains("+1")))
+                                    channels.add(channel)
+                                    added++
+                                }
+                                processed++
+                                inBatch++
+                            }
+                            if (processed < found.size) {
+                                updateImportProgress("Inserimento canali · $processed / ${found.size}", 85 + (processed * 14 / found.size.coerceAtLeast(1)))
+                                importHandler.postDelayed(this, 1L)
+                            } else {
+                                renderChannels()
+                                saveCategorySettings()
+                                persistChannelLibrary()
+                                renderSavedPlaylists()
+                                importInProgress = false
+                                finishImportProgress()
+                                status.text = "Playlist URL analizzata · ${found.size} canali letti · $added nuovi · $duplicates duplicati ignorati."
+                            }
                         }
                     }
-                    renderChannels()
-                    saveCategorySettings()
-                    persistChannelLibrary()
-                    renderSavedPlaylists()
-                    importInProgress = false
-                    finishImportProgress()
-                    status.text = "Playlist URL analizzata · " + found.size + " canali letti · " + added + " nuovi · " + duplicates + " duplicati ignorati."
+                    importHandler.post(importBatch)
                 }
             } catch (e: Exception) {
                 runOnUiThread {
@@ -1258,7 +1293,7 @@ class MainActivity : FragmentActivity() {
         val destination = pendingImportCategory
         updateImportProgress("Preparazione importazione di ${uris.size} file…", null)
         Thread {
-            val parsedFiles = mutableListOf<Triple<String, ByteArray, List<TvChannel>>>()
+            val parsedFiles = mutableListOf<List<TvChannel>>()
             var invalid = 0
             uris.forEachIndexed { index, uri ->
                 try {
@@ -1274,7 +1309,7 @@ class MainActivity : FragmentActivity() {
                     }
                     if (found.isEmpty()) invalid++ else {
                         savePlaylistCopy(displayName, bytes)
-                        parsedFiles.add(Triple(displayName, bytes, found))
+                        parsedFiles.add(found)
                     }
                 } catch (e: Exception) {
                     invalid++
@@ -1286,37 +1321,64 @@ class MainActivity : FragmentActivity() {
                 val knownKeys = channels.asSequence()
                     .map { it.name.lowercase(Locale.ROOT) + "|" + it.url }
                     .toHashSet()
+                val knownCategories = categories.toHashSet()
+                val savedCategoryMapping = runCatching {
+                    JSONObject(categoryPrefs.getString("channel_categories_json", "{}") ?: "{}")
+                }.getOrDefault(JSONObject())
+                val channelIterator = parsedFiles.asSequence().flatten().iterator()
                 var added = 0
                 var duplicates = 0
-                parsedFiles.forEach { (_, _, found) ->
-                    restoreChannelCategories(found)
-                    if (destination != null) {
-                        found.forEach { it.category = destination }
-                        if (destination !in categories) categories.add(destination)
-                    } else {
-                        found.forEach { channel ->
-                            val savedManualPath = normalizeCategoryPath(channel.category)
-                            val inferred = inferCategoryPath(channel)
-                            channel.category = if (savedManualPath.contains(" > ") && savedManualPath in categories) savedManualPath else inferred
-                            if (channel.category !in categories) categories.add(channel.category)
+                var processed = 0
+                val totalChannels = parsedFiles.sumOf { it.size }
+                val batchSize = 200
+                val importHandler = android.os.Handler(android.os.Looper.getMainLooper())
+                val importBatch = object : Runnable {
+                    override fun run() {
+                        if (isFinishing || isDestroyed) {
+                            importInProgress = false
+                            return
                         }
-                    }
-                    found.forEach { channel ->
-                        if (!knownKeys.add(channel.name.lowercase(Locale.ROOT) + "|" + channel.url)) duplicates++
-                        else {
-                            channel.selected = !(channel.name.contains("sky", true) && (channel.name.contains("plus", true) || channel.name.contains("+1")))
-                            channels.add(channel)
-                            if (channel.category !in categories) categories.add(channel.category)
-                            added++
+                        var inBatch = 0
+                        while (channelIterator.hasNext() && inBatch < batchSize) {
+                            val channel = channelIterator.next()
+                            val savedCategory = savedCategoryMapping.optString(channel.url)
+                            if (savedCategory.isNotBlank()) channel.category = normalizeCategoryPath(savedCategory)
+                            channel.category = if (destination != null) {
+                                destination
+                            } else {
+                                val savedManualPath = normalizeCategoryPath(channel.category)
+                                val inferred = inferCategoryPath(channel)
+                                if (savedManualPath.contains(" > ") && savedManualPath in knownCategories) savedManualPath else inferred
+                            }
+                            if (knownCategories.add(channel.category)) categories.add(channel.category)
+                            val key = channel.name.lowercase(Locale.ROOT) + "|" + channel.url
+                            if (!knownKeys.add(key)) {
+                                duplicates++
+                            } else {
+                                channel.selected = !(channel.name.contains("sky", true) && (channel.name.contains("plus", true) || channel.name.contains("+1")))
+                                channels.add(channel)
+                                added++
+                            }
+                            processed++
+                            inBatch++
+                        }
+                        if (channelIterator.hasNext()) {
+                            updateImportProgress("Inserimento canali · $processed / $totalChannels", (processed * 99 / totalChannels.coerceAtLeast(1)).coerceIn(1, 99))
+                            importHandler.postDelayed(this, 1L)
+                        } else {
+                            if (destination != null && knownCategories.add(destination)) categories.add(destination)
+                            pendingImportCategory = null
+                            importInProgress = false
+                            finishImportProgress()
+                            renderChannels()
+                            saveCategorySettings()
+                            persistChannelLibrary()
+                            renderSavedPlaylists()
+                            status.text = "File analizzati: ${uris.size} · Nuovi canali: $added · Duplicati ignorati: $duplicates · File senza canali validi: $invalid"
                         }
                     }
                 }
-                pendingImportCategory = null
-                importInProgress = false
-                finishImportProgress()
-                renderChannels()
-                renderSavedPlaylists()
-                status.text = "File analizzati: ${uris.size} · Nuovi canali: $added · Duplicati ignorati: $duplicates · File senza canali validi: $invalid"
+                importHandler.post(importBatch)
             }
         }.start()
     }
@@ -1844,40 +1906,58 @@ class MainActivity : FragmentActivity() {
     private fun channelLibraryAtomicFile(): AtomicFile =
         AtomicFile(channelLibraryFile())
 
-    /** Salva canali, selezione export, categorie e cartelle aperte in modo atomico. */
+    /**
+     * Cattura uno snapshot immutabile sul main thread e delega serializzazione e I/O
+     * al writer dedicato. La coda FIFO mantiene l'ordine degli snapshot.
+     */
     private fun persistChannelLibrary() {
+        val channelSnapshot = channels.map { channel ->
+            ChannelArchiveEntry(
+                channel.name, channel.url, channel.logo, channel.selected,
+                channel.category, channel.tvgId, channel.tvgName
+            )
+        }
+        val expandedSnapshot = expandedCategoryPaths.toList()
+        val savedAt = System.currentTimeMillis()
+
         runCatching {
-            val savedChannels = JSONArray()
-            channels.forEach { channel ->
-                savedChannels.put(JSONObject().apply {
-                    put("name", channel.name)
-                    put("url", channel.url)
-                    put("logo", channel.logo)
-                    put("selected", channel.selected)
-                    put("category", channel.category)
-                    put("tvgId", channel.tvgId)
-                    put("tvgName", channel.tvgName)
-                })
-            }
-            val expanded = JSONArray().apply { expandedCategoryPaths.forEach { put(it) } }
-            val state = JSONObject().apply {
-                // Mantiene il formato v1: gli archivi già presenti restano leggibili.
-                put("version", 1)
-                put("channels", savedChannels)
-                put("expandedCategories", expanded)
-                put("savedAt", System.currentTimeMillis())
-            }
-            val atomicFile = channelLibraryAtomicFile()
-            val output = atomicFile.startWrite()
-            try {
-                output.write(state.toString().toByteArray(StandardCharsets.UTF_8))
-                atomicFile.finishWrite(output)
-            } catch (error: Throwable) {
-                atomicFile.failWrite(output)
-                throw error
+            archiveExecutor.execute {
+                runCatching {
+                    val savedChannels = JSONArray()
+                    channelSnapshot.forEach { channel ->
+                        savedChannels.put(JSONObject().apply {
+                            put("name", channel.name)
+                            put("url", channel.url)
+                            put("logo", channel.logo)
+                            put("selected", channel.selected)
+                            put("category", channel.category)
+                            put("tvgId", channel.tvgId)
+                            put("tvgName", channel.tvgName)
+                        })
+                    }
+                    val expanded = JSONArray().apply { expandedSnapshot.forEach { put(it) } }
+                    val state = JSONObject().apply {
+                        // Mantiene il formato v1: gli archivi già presenti restano leggibili.
+                        put("version", 1)
+                        put("channels", savedChannels)
+                        put("expandedCategories", expanded)
+                        put("savedAt", savedAt)
+                    }
+                    val atomicFile = channelLibraryAtomicFile()
+                    val output = atomicFile.startWrite()
+                    try {
+                        output.write(state.toString().toByteArray(StandardCharsets.UTF_8))
+                        atomicFile.finishWrite(output)
+                    } catch (error: Throwable) {
+                        atomicFile.failWrite(output)
+                        throw error
+                    }
+                }.onFailure {
+                    Log.w("DAVIX-ARCHIVE", "Salvataggio archivio canali non riuscito; la copia precedente viene conservata", it)
+                }
             }
         }.onFailure {
-            Log.w("DAVIX-ARCHIVE", "Salvataggio archivio canali non riuscito; la copia precedente viene conservata", it)
+            Log.w("DAVIX-ARCHIVE", "Impossibile accodare il salvataggio dell’archivio canali", it)
         }
     }
 
@@ -1933,10 +2013,25 @@ class MainActivity : FragmentActivity() {
     }
 
     private fun saveCategorySettings() {
-        val mapping = JSONObject()
-        channels.forEach { mapping.put(it.url, it.category) }
-        categoryPrefs.edit().putString("categories_json", JSONArray(categories).toString())
-            .putString("channel_categories_json", mapping.toString()).apply()
+        // Snapshot leggero sul main thread; JSON e aggiornamento preferenze sono serializzati sul writer.
+        val categorySnapshot = categories.toList()
+        val channelCategorySnapshot = channels.map { it.url to it.category }
+        runCatching {
+            archiveExecutor.execute {
+                runCatching {
+                    val mapping = JSONObject()
+                    channelCategorySnapshot.forEach { (url, category) -> mapping.put(url, category) }
+                    categoryPrefs.edit()
+                        .putString("categories_json", JSONArray(categorySnapshot).toString())
+                        .putString("channel_categories_json", mapping.toString())
+                        .apply()
+                }.onFailure {
+                    Log.w("DAVIX-ARCHIVE", "Salvataggio impostazioni categorie non riuscito", it)
+                }
+            }
+        }.onFailure {
+            Log.w("DAVIX-ARCHIVE", "Impossibile accodare il salvataggio delle categorie", it)
+        }
     }
 
     private fun updateCount() {
@@ -2106,6 +2201,8 @@ class MainActivity : FragmentActivity() {
         stablePlaybackTask = null
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         if (::player.isInitialized) player.release()
+        // Esegue anche gli snapshot già accodati prima di terminare il writer.
+        archiveExecutor.shutdown()
         super.onDestroy()
     }
 }
