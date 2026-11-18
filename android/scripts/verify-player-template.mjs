@@ -25,8 +25,10 @@ const playerLiteGradle = readFileSync('android/playerlite/build.gradle.kts', 'ut
 const androidWorkflow = readFileSync('.github/workflows/android-apk.yml', 'utf8');
 assert.match(appGradle, /create\("davixRelease"\)/, 'Extractor must support a stable release signing key');
 assert.match(playerLiteGradle, /create\("davixRelease"\)/, 'Player Lite must support the same stable release signing key');
-assert.match(playerLiteGradle, /versionCode = 13/, 'Player Lite update must increment versionCode for in-place installation');
-assert.match(playerLiteGradle, /versionName = "1\.2\.4"/, 'Player Lite version name must match the release');
+assert.match(playerLiteGradle, /versionCode = playerVersionCode/, 'Player Lite must use its generated versionCode for in-place updates');
+assert.match(playerLiteGradle, /versionName = playerVersionName/, 'Player Lite must use its generated versionName');
+assert.match(playerLiteGradle, /DAVIX_PLAYER_VERSION_CODE.*\?: 13/, 'Local Player Lite builds must retain the latest published versionCode fallback');
+assert.match(playerLiteGradle, /DAVIX_PLAYER_VERSION_NAME.*\?: "1\.2\.4"/, 'Local Player Lite builds must retain the latest published versionName fallback');
 assert.match(liteUpdater, /CHECK_INTERVAL_MS = 6 \* 60 \* 60 \* 1000L/, 'Player Lite must periodically check for updates');
 assert.match(liteUpdater, /download automatico avviato/, 'Player Lite must automatically download newer APKs');
 assert.match(liteUpdater, /private fun hasPendingDownload\(/, 'Player Lite must avoid duplicate update downloads');

@@ -27,6 +27,8 @@ jobs:
           node-version: "22"
       - name: Verify shared HTML player template
         run: node android/scripts/verify-player-template.mjs
+      - name: Verify automatic app versioning
+        run: node android/scripts/verify-updater-versioning.mjs
       - name: Verify import memory retention
         run: node android/scripts/verify-import-memory.mjs
       - name: Verify hierarchical URL categories
@@ -78,7 +80,7 @@ jobs:
             echo "stable_signing=false" >> "$GITHUB_OUTPUT"
             echo "::warning::Stable Android signing is not configured; APKs will use temporary debug signing."
           fi
-      - name: Prepare automatic Extractor version
+      - name: Prepare automatic app versions
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         shell: bash
         run: |
@@ -89,17 +91,19 @@ jobs:
           import json
           import os
 
-          current = json.loads(os.environ["CURRENT_MANIFEST"])["extractor"]
-          next_code = int(current["versionCode"]) + 1
-          parts = str(current["versionName"]).split(".")
-          if not parts or not parts[-1].isdigit():
-              raise SystemExit("Extractor versionName is not a numeric semantic version")
-          parts[-1] = str(int(parts[-1]) + 1)
-          next_name = ".".join(parts)
-          print(f"DAVIX_EXTRACTOR_VERSION_CODE={next_code}")
-          print(f"DAVIX_EXTRACTOR_VERSION_NAME={next_name}")
-          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
-              summary.write(f"Next DAVIX Extractor version: **{next_name} ({next_code})**\\n")
+          manifest = json.loads(os.environ["CURRENT_MANIFEST"])
+          for app, prefix in (("extractor", "DAVIX_EXTRACTOR"), ("player", "DAVIX_PLAYER")):
+              current = manifest[app]
+              next_code = int(current["versionCode"]) + 1
+              parts = str(current["versionName"]).split(".")
+              if not parts or not parts[-1].isdigit():
+                  raise SystemExit(f"{app} versionName is not a numeric semantic version")
+              parts[-1] = str(int(parts[-1]) + 1)
+              next_name = ".".join(parts)
+              print(f"{prefix}_VERSION_CODE={next_code}")
+              print(f"{prefix}_VERSION_NAME={next_name}")
+              with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+                  summary.write(f"Next DAVIX {app.title()} version: **{next_name} ({next_code})**\\n")
           PY
       - name: Build both APKs
         working-directory: android

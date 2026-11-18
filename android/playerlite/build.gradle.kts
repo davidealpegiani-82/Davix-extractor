@@ -9,6 +9,11 @@ val davixKeyAlias = System.getenv("DAVIX_SIGNING_KEY_ALIAS")
 val davixKeyPassword = System.getenv("DAVIX_SIGNING_KEY_PASSWORD")
 val hasDavixSigning = listOf(davixStoreFile, davixStorePassword, davixKeyAlias, davixKeyPassword).all { !it.isNullOrBlank() }
 
+// CI increments this version from the last published updater manifest.
+// Local builds keep the latest published fallback version.
+val playerVersionCode = System.getenv("DAVIX_PLAYER_VERSION_CODE")?.toIntOrNull() ?: 13
+val playerVersionName = System.getenv("DAVIX_PLAYER_VERSION_NAME") ?: "1.2.4"
+
 
 android {
     namespace = "it.davidealpegiani.skylite"
@@ -18,8 +23,8 @@ android {
         applicationId = "it.davidealpegiani.skylite"
         minSdk = 24
         targetSdk = 35
-        versionCode = 13
-        versionName = "1.2.4"
+        versionCode = playerVersionCode
+        versionName = playerVersionName
     }
 
     signingConfigs {
