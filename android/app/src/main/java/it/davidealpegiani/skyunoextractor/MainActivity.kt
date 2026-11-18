@@ -2013,10 +2013,25 @@ class MainActivity : FragmentActivity() {
     }
 
     private fun saveCategorySettings() {
-        val mapping = JSONObject()
-        channels.forEach { mapping.put(it.url, it.category) }
-        categoryPrefs.edit().putString("categories_json", JSONArray(categories).toString())
-            .putString("channel_categories_json", mapping.toString()).apply()
+        // Snapshot leggero sul main thread; JSON e aggiornamento preferenze sono serializzati sul writer.
+        val categorySnapshot = categories.toList()
+        val channelCategorySnapshot = channels.map { it.url to it.category }
+        runCatching {
+            archiveExecutor.execute {
+                runCatching {
+                    val mapping = JSONObject()
+                    channelCategorySnapshot.forEach { (url, category) -> mapping.put(url, category) }
+                    categoryPrefs.edit()
+                        .putString("categories_json", JSONArray(categorySnapshot).toString())
+                        .putString("channel_categories_json", mapping.toString())
+                        .apply()
+                }.onFailure {
+                    Log.w("DAVIX-ARCHIVE", "Salvataggio impostazioni categorie non riuscito", it)
+                }
+            }
+        }.onFailure {
+            Log.w("DAVIX-ARCHIVE", "Impossibile accodare il salvataggio delle categorie", it)
+        }
     }
 
     private fun updateCount() {
