@@ -1269,14 +1269,18 @@ class MainActivity : FragmentActivity() {
         fun has(vararg terms: String) = terms.any { source.contains(it) }
         fun token(vararg terms: String) = terms.any { Regex("(^|[^a-z0-9])" + Regex.escape(it) + "([^a-z0-9]|$)").containsMatchIn(source) }
 
+        // Per distinguere un canale lineare da un film non basta il nome:
+        // "Sky Cinema" può essere un canale LIVE. I segnali di tipo arrivano
+        // prima dal percorso URL e dal group-title, poi dai metadati episodio.
         val seriesHint = path.contains("/series/") ||
-            has("serie tv", "series", "tv series", "season", "stagione", "episodio", "episode", "anime", "cartoni")
+            group.contains("serie tv") || group.contains("series") || group.contains("tv show") ||
+            Regex("\\bS[0-9]{1,2}E[0-9]{1,2}\\b", RegexOption.IGNORE_CASE).containsMatchIn(name)
         val movieHint = path.contains("/movie/") || path.contains("/movies/") ||
-            has("film", "films", "movie", "movies", "cinema", "vod film")
+            group.contains("film") || group.contains("movie") || group.contains("cinema")
         val vodExtension = Regex("\\.(mp4|mkv|avi|mov|m4v|wmv|webm)(?:$|[?&])").containsMatchIn(url)
         val liveHint = path.contains("/live/") ||
             Regex("\\.(ts|m3u8)(?:$|[?&])").containsMatchIn(url) ||
-            has("live tv", "canali live", "tv live", "iptv live")
+            group.contains("live") || has("canali live", "tv live", "iptv live")
         val explicitVod = path.contains("/vod/") || token("vod") || has("video on demand", "on demand")
         val isVod = !liveHint && (seriesHint || movieHint || vodExtension || explicitVod)
 
