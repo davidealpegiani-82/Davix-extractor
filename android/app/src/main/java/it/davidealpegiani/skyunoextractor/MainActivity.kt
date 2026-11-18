@@ -1285,7 +1285,7 @@ class MainActivity : FragmentActivity() {
         val isVod = !liveHint && (seriesHint || movieHint || vodExtension || explicitVod)
 
         if (isVod) {
-            val isSeries = seriesHint || (explicitVod && !movieHint && !vodExtension)
+            val isSeries = seriesHint
             val genre = when {
                 has("azione", "action", "adventure", "avventura", "martial arts") -> "Azione e Avventura"
                 has("commedia", "comedy", "comico") -> "Commedia"
