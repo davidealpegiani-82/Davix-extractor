@@ -28,6 +28,7 @@ for (const required of [
   assert.ok(classifier.includes(required), `URL classifier is missing expected rule: ${required}`);
 }
 assert.ok(classifier.includes("token(\"vod\")"), "VOD marker must use token matching to avoid substring false positives");
+assert.ok(classifier.includes("val isSeries = seriesHint"), "Generic VOD categories must not be guessed as TV series");
 assert.ok(!classifier.includes('return normalizeCategoryPath(channel.category)'), "Provider group-title must not be copied blindly as a new folder");
 
 const rendererStart = source.indexOf("fun addFolderGroups(");
