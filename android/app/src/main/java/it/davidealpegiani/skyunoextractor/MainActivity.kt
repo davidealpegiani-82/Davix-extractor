@@ -58,6 +58,17 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.StandardCharsets
 import java.util.Locale
+import java.util.concurrent.Executors
+
+private data class ChannelArchiveEntry(
+    val name: String,
+    val url: String,
+    val logo: String,
+    val selected: Boolean,
+    val category: String,
+    val tvgId: String,
+    val tvgName: String
+)
 
 data class TvChannel(
     val name: String,
@@ -72,6 +83,10 @@ data class TvChannel(
 @OptIn(UnstableApi::class)
 class MainActivity : FragmentActivity() {
     private val channels = mutableListOf<TvChannel>()
+    // Un solo writer seriale: impedisce che snapshot più vecchi finiscano su disco dopo quelli recenti.
+    private val archiveExecutor = Executors.newSingleThreadExecutor { task ->
+        Thread(task, "DAVIX-Archive").apply { isDaemon = true }
+    }
     private val categories = mutableListOf("Intrattenimento", "Sport", "Cinema", "Documentari", "Musica", "XXX", "Non classificati")
     private val categoryPrefs by lazy { getSharedPreferences("davix_extractor_categories", MODE_PRIVATE) }
     // Selezione multipla separata dalla selezione di esportazione.
@@ -1891,40 +1906,58 @@ class MainActivity : FragmentActivity() {
     private fun channelLibraryAtomicFile(): AtomicFile =
         AtomicFile(channelLibraryFile())
 
-    /** Salva canali, selezione export, categorie e cartelle aperte in modo atomico. */
+    /**
+     * Cattura uno snapshot immutabile sul main thread e delega serializzazione e I/O
+     * al writer dedicato. La coda FIFO mantiene l'ordine degli snapshot.
+     */
     private fun persistChannelLibrary() {
+        val channelSnapshot = channels.map { channel ->
+            ChannelArchiveEntry(
+                channel.name, channel.url, channel.logo, channel.selected,
+                channel.category, channel.tvgId, channel.tvgName
+            )
+        }
+        val expandedSnapshot = expandedCategoryPaths.toList()
+        val savedAt = System.currentTimeMillis()
+
         runCatching {
-            val savedChannels = JSONArray()
-            channels.forEach { channel ->
-                savedChannels.put(JSONObject().apply {
-                    put("name", channel.name)
-                    put("url", channel.url)
-                    put("logo", channel.logo)
-                    put("selected", channel.selected)
-                    put("category", channel.category)
-                    put("tvgId", channel.tvgId)
-                    put("tvgName", channel.tvgName)
-                })
-            }
-            val expanded = JSONArray().apply { expandedCategoryPaths.forEach { put(it) } }
-            val state = JSONObject().apply {
-                // Mantiene il formato v1: gli archivi già presenti restano leggibili.
-                put("version", 1)
-                put("channels", savedChannels)
-                put("expandedCategories", expanded)
-                put("savedAt", System.currentTimeMillis())
-            }
-            val atomicFile = channelLibraryAtomicFile()
-            val output = atomicFile.startWrite()
-            try {
-                output.write(state.toString().toByteArray(StandardCharsets.UTF_8))
-                atomicFile.finishWrite(output)
-            } catch (error: Throwable) {
-                atomicFile.failWrite(output)
-                throw error
+            archiveExecutor.execute {
+                runCatching {
+                    val savedChannels = JSONArray()
+                    channelSnapshot.forEach { channel ->
+                        savedChannels.put(JSONObject().apply {
+                            put("name", channel.name)
+                            put("url", channel.url)
+                            put("logo", channel.logo)
+                            put("selected", channel.selected)
+                            put("category", channel.category)
+                            put("tvgId", channel.tvgId)
+                            put("tvgName", channel.tvgName)
+                        })
+                    }
+                    val expanded = JSONArray().apply { expandedSnapshot.forEach { put(it) } }
+                    val state = JSONObject().apply {
+                        // Mantiene il formato v1: gli archivi già presenti restano leggibili.
+                        put("version", 1)
+                        put("channels", savedChannels)
+                        put("expandedCategories", expanded)
+                        put("savedAt", savedAt)
+                    }
+                    val atomicFile = channelLibraryAtomicFile()
+                    val output = atomicFile.startWrite()
+                    try {
+                        output.write(state.toString().toByteArray(StandardCharsets.UTF_8))
+                        atomicFile.finishWrite(output)
+                    } catch (error: Throwable) {
+                        atomicFile.failWrite(output)
+                        throw error
+                    }
+                }.onFailure {
+                    Log.w("DAVIX-ARCHIVE", "Salvataggio archivio canali non riuscito; la copia precedente viene conservata", it)
+                }
             }
         }.onFailure {
-            Log.w("DAVIX-ARCHIVE", "Salvataggio archivio canali non riuscito; la copia precedente viene conservata", it)
+            Log.w("DAVIX-ARCHIVE", "Impossibile accodare il salvataggio dell’archivio canali", it)
         }
     }
 
@@ -2153,6 +2186,8 @@ class MainActivity : FragmentActivity() {
         stablePlaybackTask = null
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         if (::player.isInitialized) player.release()
+        // Esegue anche gli snapshot già accodati prima di terminare il writer.
+        archiveExecutor.shutdown()
         super.onDestroy()
     }
 }
