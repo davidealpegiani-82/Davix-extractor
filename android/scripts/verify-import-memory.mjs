@@ -11,6 +11,11 @@ assert.equal((source.match(/val batchSize = 200/g) || []).length, 2, "Both file 
 assert.ok(source.includes("importHandler.postDelayed(this, 1L)"), "Large imports must yield between UI batches");
 assert.ok(source.includes("val knownCategories = categories.toHashSet()"), "Category deduplication must use indexed membership during bulk import");
 assert.ok(!source.includes("mutableListOf<Triple<String, ByteArray, List<TvChannel>>>"), "Do not retain every source file byte array alongside parsed channels");
+assert.ok(source.includes("Executors.newSingleThreadExecutor"), "Archive writes must use a single ordered background writer");
+assert.ok(source.includes("private data class ChannelArchiveEntry"), "Archive worker must receive immutable channel snapshots");
+assert.ok(source.includes("archiveExecutor.execute"), "Archive serialization must be queued off the UI thread");
+assert.ok(source.includes("archiveExecutor.shutdown()"), "Archive worker must drain queued writes on Activity destruction");
+assert.ok(source.includes("private fun saveCategorySettings()") && source.includes("channelCategorySnapshot"), "Category mapping must be snapshotted before background serialization");
 assert.ok(source.includes("private fun readImportBytes("), "Bounded streaming file reader must remain in place");
 assert.ok(source.includes("Il file supera il limite di importazione di 64 MB."), "File import size guard must remain in place");
 
