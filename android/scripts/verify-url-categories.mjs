@@ -29,4 +29,12 @@ for (const required of [
 }
 assert.ok(classifier.includes("token(\"vod\")"), "VOD marker must use token matching to avoid substring false positives");
 assert.ok(!classifier.includes('return normalizeCategoryPath(channel.category)'), "Provider group-title must not be copied blindly as a new folder");
+
+const rendererStart = source.indexOf("fun addFolderGroups(");
+const rendererEnd = source.indexOf("addFolderGroups(selected", rendererStart);
+assert.ok(rendererStart >= 0 && rendererEnd > rendererStart, "Folder renderer must remain available");
+const renderer = source.slice(rendererStart, rendererEnd);
+assert.ok(renderer.includes("data class FolderNode"), "Category paths must be rendered as a folder tree");
+assert.ok(renderer.includes("renderFolderNode(child, depth + 1)"), "Nested categories must expand as real subfolders");
+assert.ok(renderer.includes("countChannels(node)"), "Folder counts must include nested descendants");
 console.log("DAVIX hierarchical URL category checks passed.");
