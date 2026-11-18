@@ -1785,46 +1785,62 @@ class MainActivity : FragmentActivity() {
             })
         }
         fun addFolderGroups(items: List<IndexedValue<TvChannel>>, target: LinearLayout, prefix: String) {
-            val grouped = items.groupBy { normalizeCategoryPath(it.value.category).ifBlank { "Da classificare" } }
-                .toSortedMap(String.CASE_INSENSITIVE_ORDER)
-            grouped.forEach { (path, entries) ->
-                val key = "$prefix:$path"
+            data class FolderNode(
+                val name: String,
+                val path: String,
+                val entries: MutableList<IndexedValue<TvChannel>> = mutableListOf(),
+                val children: MutableMap<String, FolderNode> = linkedMapOf()
+            )
+            val rootNode = FolderNode("", "")
+            items.forEach { entry ->
+                val parts = normalizeCategoryPath(entry.value.category)
+                    .ifBlank { "Da classificare" }.split(" > ").filter { it.isNotBlank() }
+                var node = rootNode
+                parts.forEach { part ->
+                    val path = if (node.path.isBlank()) part else "${node.path} > $part"
+                    node = node.children.getOrPut(part) { FolderNode(part, path) }
+                }
+                node.entries.add(entry)
+            }
+
+            fun countChannels(node: FolderNode): Int =
+                node.entries.size + node.children.values.sumOf { countChannels(it) }
+
+            fun renderFolderNode(node: FolderNode, depth: Int) {
+                val key = "$prefix:${node.path}"
                 val expanded = key in expandedCategoryPaths
+                val total = countChannels(node)
                 val header = LinearLayout(this).apply {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
-                    setPadding(dp(12), dp(11), dp(10), dp(11))
-                    setBackgroundColor(0xFF1B2A40.toInt())
+                    setPadding(dp(12 + depth * 16), dp(10), dp(10), dp(10))
+                    setBackgroundColor(if (depth == 0) 0xFF1B2A40.toInt() else 0xFF162235.toInt())
                     isClickable = true
                     isFocusable = true
-                    contentDescription = "${if (expanded) "Chiudi" else "Apri"} cartella $path, ${entries.size} canali"
+                    contentDescription = "${if (expanded) "Chiudi" else "Apri"} cartella ${node.path}, $total canali"
                     setOnClickListener {
                         if (expanded) expandedCategoryPaths.remove(key) else expandedCategoryPaths.add(key)
                         renderChannels()
                     }
                 }
-                val folderIcon = TextView(this).apply {
+                header.addView(TextView(this).apply {
                     text = if (expanded) "📂" else "📁"
-                    textSize = 17f
-                }
-                header.addView(folderIcon)
-                val title = TextView(this).apply {
-                    text = path.replace(" > ", "  ›  ")
-                    textSize = 13f
+                    textSize = 16f
+                })
+                header.addView(TextView(this).apply {
+                    text = node.name
+                    textSize = if (depth == 0) 14f else 13f
                     setTextColor(Color.WHITE)
                     setTypeface(null, android.graphics.Typeface.BOLD)
                     setPadding(dp(9), 0, 0, 0)
-                }
-                header.addView(title, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
                 header.addView(TextView(this).apply {
-                    text = "${entries.size}  ·  ${if (expanded) "⌃" else "⌄"}"
+                    text = "$total  ·  ${if (expanded) "⌃" else "⌄"}"
                     textSize = 12f
                     setTextColor(CYAN)
                 })
                 if (bulkSelectionMode) {
-                    // La selezione della cartella comprende anche tutte le sue
-                    // sottocartelle, senza toccare le altre categorie.
-                    val folderIndices = bulkIndicesByPath[path].orEmpty()
+                    val folderIndices = bulkIndicesByPath[node.path].orEmpty()
                     val allFolderSelected = folderIndices.isNotEmpty() &&
                         folderIndices.all { it in bulkSelectedIndices }
                     header.addView(buttonView(
@@ -1836,34 +1852,47 @@ class MainActivity : FragmentActivity() {
                             bulkSelectedIndices.addAll(folderIndices)
                         }
                         renderChannels()
-                    }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)).apply {
+                    }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(36)).apply {
                         leftMargin = dp(8)
                     })
                 }
-                target.addView(header, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                    bottomMargin = dp(5)
-                    topMargin = dp(4)
+                target.addView(header, LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    bottomMargin = dp(4)
+                    topMargin = dp(if (depth == 0) 5 else 2)
                 })
+
                 if (expanded) {
-                    val visibleLimit = (folderPageSizes[key] ?: CHANNELS_PER_FOLDER_PAGE).coerceAtLeast(CHANNELS_PER_FOLDER_PAGE)
-                    entries.take(visibleLimit).forEach { entry ->
+                    val visibleLimit = (folderPageSizes[key] ?: CHANNELS_PER_FOLDER_PAGE)
+                        .coerceAtLeast(CHANNELS_PER_FOLDER_PAGE)
+                    node.entries.take(visibleLimit).forEach { entry ->
                         val holder = LinearLayout(this).apply {
-                            setPadding(dp(10), 0, 0, 0)
+                            setPadding(dp(10 + (depth + 1) * 14), 0, 0, 0)
                         }
                         addChannelRow(entry.index, entry.value, holder)
-                        target.addView(holder, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+                        target.addView(holder, LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+                        ))
                     }
-                    if (entries.size > visibleLimit) {
-                        val remaining = entries.size - visibleLimit
-                        target.addView(buttonView("Mostra altri ${minOf(CHANNELS_PER_FOLDER_PAGE, remaining)} · $remaining rimanenti") {
+                    if (node.entries.size > visibleLimit) {
+                        val remaining = node.entries.size - visibleLimit
+                        target.addView(buttonView(
+                            "Mostra altri ${minOf(CHANNELS_PER_FOLDER_PAGE, remaining)} · $remaining rimanenti"
+                        ) {
                             folderPageSizes[key] = visibleLimit + CHANNELS_PER_FOLDER_PAGE
                             renderChannels()
-                        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(42)).apply {
-                            bottomMargin = dp(6)
-                        })
+                        }, LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT, dp(42)
+                        ).apply { bottomMargin = dp(6) })
                     }
+                    node.children.values.sortedBy { it.name.lowercase(Locale.ROOT) }
+                        .forEach { child -> renderFolderNode(child, depth + 1) }
                 }
             }
+
+            rootNode.children.values.sortedBy { it.name.lowercase(Locale.ROOT) }
+                .forEach { node -> renderFolderNode(node, 0) }
         }
         addFolderGroups(selected, selectedList, "selected")
         addFolderGroups(others, otherList, "other")
