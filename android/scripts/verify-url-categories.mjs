@@ -7,6 +7,8 @@ const urlImportEnd = source.indexOf("private fun showCloudSyncSettings()", urlIm
 assert.ok(urlImportStart >= 0 && urlImportEnd > urlImportStart, "Remote URL import flow must remain available");
 const urlImport = source.slice(urlImportStart, urlImportEnd);
 assert.ok(urlImport.includes("inferUrlCategoryPath(channel.copy(category = sourceGroup))"), "URL imports must classify using the original provider group-title");
+assert.ok(urlImport.includes("isLegacyProviderGroup"), "Legacy provider group-title folders must migrate into the LIVE/VOD hierarchy on URL reimport");
+assert.ok(urlImport.includes("savedPath.equals(sourcePath, ignoreCase = true)"), "Manual category overrides that differ from the provider group-title must remain preserved");
 assert.ok(urlImport.includes("isAutomaticallyClassifiedUrlCategory(savedCategory)"), "Previously generated categories must be recalculated");
 assert.ok(urlImport.includes("savedCategory.isNotBlank() && !isAutomaticallyClassifiedUrlCategory(savedCategory)"), "User-defined categories must be preserved");
 assert.ok(urlImport.includes("existing.category = channel.category"), "Reimporting a URL playlist must migrate existing automatically classified channels");
