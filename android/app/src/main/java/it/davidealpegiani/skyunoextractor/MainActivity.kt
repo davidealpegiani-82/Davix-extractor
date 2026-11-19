@@ -1377,16 +1377,25 @@ class MainActivity : FragmentActivity() {
             "LIVE > News", "LIVE > Documentari", "LIVE > Bambini", "LIVE > Musica",
             "LIVE > Regionali", "LIVE > Intrattenimento", "LIVE > Cinema",
             "LIVE > Internazionali", "LIVE > Altri canali",
+            // Percorsi LIVE generati dalle versioni precedenti.
+            "LIVE > Sport > Motori", "LIVE > Sport > Tennis", "LIVE > Sport > Basket",
+            // Generi VOD della precedente classificazione, da ricondurre al nuovo schema.
             "VOD > FILM > Azione e Avventura", "VOD > FILM > Commedia",
             "VOD > FILM > Crime e Thriller", "VOD > FILM > Horror",
             "VOD > FILM > Fantascienza e Fantasy", "VOD > FILM > Animazione e Famiglia",
             "VOD > FILM > Documentari e Musical", "VOD > FILM > Drammatici e Storici",
             "VOD > FILM > Altri film",
+            "VOD > FILM > Romantici", "VOD > FILM > Documentari", "VOD > FILM > Famiglia e Bambini",
+            "VOD > FILM > Storici e Guerra", "VOD > FILM > Western", "VOD > FILM > Musicali",
+            "VOD > FILM > Reality e Show", "VOD > FILM > Produzioni Italiane", "VOD > FILM > Internazionali",
             "VOD > SERIE > Crime e Thriller", "VOD > SERIE > Commedia",
             "VOD > SERIE > Horror", "VOD > SERIE > Fantascienza e Fantasy",
             "VOD > SERIE > Azione e Avventura", "VOD > SERIE > Anime e Animazione",
             "VOD > SERIE > Documentari e Reality", "VOD > SERIE > Drammatiche",
-            "VOD > SERIE > Altre serie"
+            "VOD > SERIE > Altre serie",
+            "VOD > SERIE > Romantici", "VOD > SERIE > Documentari", "VOD > SERIE > Famiglia e Bambini",
+            "VOD > SERIE > Storici e Guerra", "VOD > SERIE > Western", "VOD > SERIE > Musicali",
+            "VOD > SERIE > Reality e Show", "VOD > SERIE > Produzioni Italiane", "VOD > SERIE > Internazionali"
         )
         val legacy = listOf(
             "Sport", "Cinema", "Serie TV", "Documentari", "Bambini",
