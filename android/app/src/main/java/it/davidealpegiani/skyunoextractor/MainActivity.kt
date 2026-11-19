@@ -768,7 +768,18 @@ class MainActivity : FragmentActivity() {
                                 val sourceGroup = channel.category
                                 val savedCategory = normalizeCategoryPath(savedCategoryMapping.optString(channel.url))
                                 val inferred = inferUrlCategoryPath(channel.copy(category = sourceGroup))
-                                channel.category = if (savedCategory.isNotBlank() && !isAutomaticallyClassifiedUrlCategory(savedCategory)) {
+                                // Le vecchie importazioni URL salvavano il group-title del provider
+                                // come categoria semplice. Se il valore salvato coincide ancora con il
+                                // group-title originale, non è una personalizzazione: va migrato nella
+                                // gerarchia LIVE/VOD. Una categoria manuale diversa dal group-title resta intatta.
+                                val savedPath = normalizeCategoryPath(savedCategory)
+                                val sourcePath = normalizeCategoryPath(sourceGroup)
+                                val isLegacyProviderGroup = savedPath.isNotBlank() &&
+                                    savedPath.equals(sourcePath, ignoreCase = true) &&
+                                    !savedPath.contains(" > ")
+                                val preserveManualCategory = savedCategory.isNotBlank() &&
+                                    !isAutomaticallyClassifiedUrlCategory(savedCategory)
+                                channel.category = if (preserveManualCategory && !isLegacyProviderGroup) {
                                     savedCategory
                                 } else {
                                     inferred
