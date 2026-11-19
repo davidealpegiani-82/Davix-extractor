@@ -114,6 +114,7 @@ class MainActivity : FragmentActivity() {
     private lateinit var importProgressLabel: TextView
     private lateinit var importProgressBar: ProgressBar
     private var currentPlayingChannelUrl: String? = null
+    private var playingChannelButton: Button? = null
     private var importInProgress = false
     private lateinit var count: TextView
     private lateinit var playerView: PlayerView
@@ -1979,6 +1980,7 @@ class MainActivity : FragmentActivity() {
         // click/espansione: il salvataggio avviene nei punti di modifica e onStop.
         selectedList.removeAllViews()
         otherList.removeAllViews()
+        playingChannelButton = null
         val selected = channels.withIndex().filter { it.value.selected }
         val others = channels.withIndex().filter { !it.value.selected }
         // Costruisce una sola mappa degli indici per cartella e antenati.
@@ -2028,13 +2030,15 @@ class MainActivity : FragmentActivity() {
                 row.addView(bulkCheck)
             }
             val play = Button(this).apply {
+                tag = channel.name
                 text = if (isPlayingChannel) "▶  IN ONDA · ${channel.name}" else "▶  ${channel.name}"
                 isAllCaps = false
                 textSize = 13f
                 gravity = Gravity.CENTER_VERTICAL or Gravity.START
                 setTextColor(if (isPlayingChannel) CYAN else Color.WHITE)
                 setBackgroundColor(Color.TRANSPARENT)
-                setOnClickListener { playChannel(index) }
+                if (isPlayingChannel) playingChannelButton = this
+                setOnClickListener { playChannel(index, this) }
             }
             row.addView(play, LinearLayout.LayoutParams(0, dp(48), 1f))
             row.addView(buttonView(channel.category) { showCategoryPicker(channel) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(42)))
@@ -2469,11 +2473,23 @@ class MainActivity : FragmentActivity() {
         }
     }
 
-    private fun playChannel(index: Int) {
+    private fun playChannel(index: Int, clickedButton: Button? = null) {
         val channel = channels.getOrNull(index) ?: return
+        // Non ricostruire migliaia di righe ad ogni cambio canale: aggiorna solo
+        // il pulsante precedente e quello appena premuto, evitando blocchi UI.
+        playingChannelButton?.let { previous ->
+            val previousName = previous.tag as? String ?: "Canale"
+            previous.text = "▶  $previousName"
+            previous.setTextColor(Color.WHITE)
+        }
         currentPlayingChannelUrl = channel.url
+        clickedButton?.apply {
+            tag = channel.name
+            text = "▶  IN ONDA · ${channel.name}"
+            setTextColor(CYAN)
+        }
+        playingChannelButton = clickedButton
         if (::currentChannelLabel.isInitialized) currentChannelLabel.text = "▶  IN RIPRODUZIONE · ${channel.name}"
-        renderChannels()
         playbackGeneration++
         status.text = "Avvio: ${channel.name}"
         try {
