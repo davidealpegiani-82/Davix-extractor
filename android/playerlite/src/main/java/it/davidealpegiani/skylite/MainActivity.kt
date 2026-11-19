@@ -870,7 +870,10 @@ class MainActivity : Activity() {
     }
 
     private fun toggleFavorite(channel: CloudChannel) {
-        if (!favoriteUrls.add(channel.url)) favoriteUrls.remove(channel.url)
+        val group = groupChannels(cloudChannels).firstOrNull { candidate -> candidate.sources.any { it.url == channel.url } }
+        val urls = group?.sources?.map { it.url }.orEmpty().ifEmpty { listOf(channel.url) }
+        val remove = urls.any { it in favoriteUrls }
+        if (remove) favoriteUrls.removeAll(urls.toSet()) else favoriteUrls.addAll(urls)
         playerPrefs.edit().putStringSet("favorite_urls", favoriteUrls.toSet()).apply()
         renderCloudChannels()
         if (isTvDevice()) {
