@@ -663,10 +663,11 @@ class MainActivity : Activity() {
             .sortedBy { it.lowercase() }
         val rendered = mutableSetOf<String>()
 
-        val favorites = cloudChannels.filter { it.url in favoriteUrls }
-        if (favorites.isNotEmpty()) {
-            addCategoryFolder(target, "★ Preferiti", "special:favorites", favorites, isCompact)
-            rendered.addAll(favorites.map { it.url })
+        val favoriteGroups = groupChannels(cloudChannels).filter { group -> group.sources.any { it.url in favoriteUrls } }
+        if (favoriteGroups.isNotEmpty()) {
+            val favoriteSources = favoriteGroups.flatMap { it.sources }
+            addCategoryFolder(target, "★ Preferiti", "special:favorites", favoriteSources, isCompact)
+            rendered.addAll(favoriteSources.map { it.url })
         }
 
         paths.forEach { path ->
@@ -925,7 +926,9 @@ class MainActivity : Activity() {
             letterSpacing = 0.06f
             setPadding(0, dp(2), 0, 0)
         })
-        epgGuides[channel.url]?.let { guide ->
+        val logicalGroup = groupChannels(cloudChannels).firstOrNull { group -> group.sources.any { it.url == channel.url } }
+        val sharedGuide = epgGuides[channel.url] ?: logicalGroup?.sources?.firstNotNullOfOrNull { epgGuides[it.url] }
+        sharedGuide?.let { guide ->
             val lines = mutableListOf<String>()
             if (guide.nowTitle.isNotBlank()) {
                 val times = if (guide.nowStartMs > 0L && guide.nowStopMs > 0L) EpgGuideManager.formatTime(guide.nowStartMs) + "–" + EpgGuideManager.formatTime(guide.nowStopMs) else ""
