@@ -1665,50 +1665,115 @@ class MainActivity : FragmentActivity() {
         }
         importInProgress = true
         updateImportProgress("Caricamento playlist salvata · lettura file…", null)
-        Thread {
+        Thread({
             try {
                 val found = parseChannels(file.readText(StandardCharsets.UTF_8)) { parsed ->
                     updateImportProgress("Analisi playlist salvata · $parsed%", parsed)
                 }
+                if (found.isEmpty()) {
+                    runOnUiThread {
+                        if (!isFinishing && !isDestroyed) {
+                            status.text = "Nessun canale valido trovato nel file salvato."
+                            toast(status.text.toString())
+                        }
+                        importInProgress = false
+                        finishImportProgress()
+                    }
+                    return@Thread
+                }
+
                 runOnUiThread {
-                    if (isFinishing || isDestroyed) { importInProgress = false; return@runOnUiThread }
-                    if (found.isEmpty()) {
-                        status.text = "Nessun canale valido trovato nel file salvato."
-                        toast(status.text.toString())
-                    } else {
-                        restoreChannelCategories(found)
-                        val knownKeys = channels.asSequence().map { it.name.lowercase(Locale.ROOT) + "|" + it.url }.toHashSet()
-                        var added = 0
-                        var duplicates = 0
-                        found.forEachIndexed { index, channel ->
-                            if (index % 250 == 0) updateImportProgress("Inserimento canali · ${index + 1} / ${found.size}", 90 + index * 10 / found.size.coerceAtLeast(1))
-                            if (!knownKeys.add(channel.name.lowercase(Locale.ROOT) + "|" + channel.url)) duplicates++
-                            else {
-                                channel.selected = false
-                                channels.add(channel)
-                                if (channel.category !in categories) categories.add(channel.category)
-                                added++
+                    if (isFinishing || isDestroyed) {
+                        importInProgress = false
+                        return@runOnUiThread
+                    }
+                    val savedMappingJson = categoryPrefs.getString("channel_categories_json", "{}") ?: "{}"
+                    val knownKeysSnapshot = channels.map {
+                        it.name.lowercase(Locale.ROOT) + "|" + it.url
+                    }.toHashSet()
+
+                    // Anche la normalizzazione delle categorie avviene fuori dal thread UI.
+                    Thread({
+                        try {
+                            val mapping = runCatching { JSONObject(savedMappingJson) }.getOrDefault(JSONObject())
+                            found.forEach { channel ->
+                                val savedCategory = normalizeCategoryPath(mapping.optString(channel.url))
+                                if (savedCategory.isNotBlank()) channel.category = savedCategory
+                            }
+                            runOnUiThread {
+                                if (isFinishing || isDestroyed) {
+                                    importInProgress = false
+                                    return@runOnUiThread
+                                }
+                                var added = 0
+                                var duplicates = 0
+                                var processed = 0
+                                val importHandler = Handler(Looper.getMainLooper())
+                                val importBatch = object : Runnable {
+                                    override fun run() {
+                                        if (isFinishing || isDestroyed) {
+                                            importInProgress = false
+                                            return
+                                        }
+                                        val batchStartedAt = android.os.SystemClock.uptimeMillis()
+                                        var inBatch = 0
+                                        while (processed < found.size && inBatch < 120 &&
+                                            android.os.SystemClock.uptimeMillis() - batchStartedAt < 12L
+                                        ) {
+                                            val channel = found[processed]
+                                            val key = channel.name.lowercase(Locale.ROOT) + "|" + channel.url
+                                            if (!knownKeysSnapshot.add(key)) {
+                                                duplicates++
+                                            } else {
+                                                channel.selected = false
+                                                channels.add(channel)
+                                                if (channel.category !in categories) categories.add(channel.category)
+                                                added++
+                                            }
+                                            processed++
+                                            inBatch++
+                                        }
+                                        if (processed < found.size) {
+                                            updateImportProgress(
+                                                "Inserimento canali · $processed / ${found.size}",
+                                                90 + processed * 10 / found.size.coerceAtLeast(1)
+                                            )
+                                            importHandler.postDelayed(this, 8L)
+                                        } else {
+                                            status.text = "Playlist caricata: ${file.name.substringAfter('_')} · Nuovi canali: $added · Duplicati ignorati: $duplicates"
+                                            renderChannels()
+                                            persistChannelLibrary()
+                                            saveCategorySettings()
+                                            importInProgress = false
+                                            finishImportProgress()
+                                        }
+                                    }
+                                }
+                                importHandler.post(importBatch)
+                            }
+                        } catch (error: Exception) {
+                            runOnUiThread {
+                                importInProgress = false
+                                finishImportProgress()
+                                if (!isFinishing && !isDestroyed) {
+                                    status.text = "Impossibile classificare la playlist: ${error.message}"
+                                    toast(status.text.toString())
+                                }
                             }
                         }
-                        status.text = "Playlist caricata: ${file.name.substringAfter('_')} · Nuovi canali: $added · Duplicati ignorati: $duplicates"
-                        renderChannels()
-                        persistChannelLibrary()
-                        saveCategorySettings()
-                    }
-                    importInProgress = false
-                    finishImportProgress()
+                    }, "DAVIX-Saved-Playlist").apply { isDaemon = true }.start()
                 }
-            } catch (e: Exception) {
+            } catch (error: Exception) {
                 runOnUiThread {
                     importInProgress = false
                     finishImportProgress()
                     if (!isFinishing && !isDestroyed) {
-                        status.text = "Impossibile caricare la playlist: ${e.message}"
+                        status.text = "Impossibile caricare la playlist: ${error.message}"
                         toast(status.text.toString())
                     }
                 }
             }
-        }.start()
+        }, "DAVIX-Saved-Playlist-Read").apply { isDaemon = true }.start()
     }
 
     private fun confirmClearSavedPlaylists() {
