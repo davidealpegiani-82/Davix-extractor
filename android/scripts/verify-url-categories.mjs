@@ -10,7 +10,7 @@ assert.ok(urlImport.includes("inferUrlCategoryPath(channel.copy(category = sourc
 assert.ok(urlImport.includes("isLegacyProviderGroup"), "Legacy provider group-title folders must migrate into the LIVE/VOD hierarchy on URL reimport");
 assert.ok(urlImport.includes("savedPath.equals(sourcePath, ignoreCase = true)"), "Manual category overrides that differ from the provider group-title must remain preserved");
 assert.ok(urlImport.includes("isAutomaticallyClassifiedUrlCategory(savedCategory)"), "Previously generated categories must be recalculated");
-assert.ok(urlImport.includes("savedCategory.isNotBlank() && !isAutomaticallyClassifiedUrlCategory(savedCategory)"), "User-defined categories must be preserved");
+assert.ok(urlImport.includes("val preserveManualCategory = savedCategory.isNotBlank() &&") && urlImport.includes("if (preserveManualCategory && !isLegacyProviderGroup)"), "User-defined categories must be preserved unless they are unchanged legacy provider group-titles");
 assert.ok(urlImport.includes("existing.category = channel.category"), "Reimporting a URL playlist must migrate existing automatically classified channels");
 assert.ok(urlImport.includes("reorganized++"), "The import report must count channels reorganized");
 assert.ok(urlImport.includes("categories.removeAll"), "Empty obsolete automatic folders must be pruned after reimport");
