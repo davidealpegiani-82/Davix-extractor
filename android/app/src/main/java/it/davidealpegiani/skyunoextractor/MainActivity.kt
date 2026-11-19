@@ -1640,7 +1640,7 @@ class MainActivity : FragmentActivity() {
                             if (index % 250 == 0) updateImportProgress("Inserimento canali · ${index + 1} / ${found.size}", 90 + index * 10 / found.size.coerceAtLeast(1))
                             if (!knownKeys.add(channel.name.lowercase(Locale.ROOT) + "|" + channel.url)) duplicates++
                             else {
-                                channel.selected = !(channel.name.contains("sky", true) && (channel.name.contains("plus", true) || channel.name.contains("+1")))
+                                channel.selected = false
                                 channels.add(channel)
                                 if (channel.category !in categories) categories.add(channel.category)
                                 added++
@@ -2199,11 +2199,12 @@ class MainActivity : FragmentActivity() {
             Thread(task, "DAVIX-Restore").apply { isDaemon = true }
         }
         restoreExecutor.execute {
+            var legacySelectionReset = false
             val restored = runCatching {
                 val state = channelLibraryAtomicFile().openRead().bufferedReader(StandardCharsets.UTF_8).use {
                     JSONObject(it.readText())
                 }
-                val legacySelectionReset = state.optInt("version", 1) < 2
+                legacySelectionReset = state.optInt("version", 1) < 2
                 val savedChannels = state.optJSONArray("channels") ?: JSONArray()
                 val restoredChannels = ArrayList<TvChannel>(savedChannels.length())
                 val restoredCategories = LinkedHashSet<String>()
