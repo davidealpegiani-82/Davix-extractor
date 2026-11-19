@@ -40,7 +40,7 @@ import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.source.LoadEventInfo
 import androidx.media3.exoplayer.source.MediaLoadData
 import java.io.IOException
-import androidx.media3.exoplayer.hls.HlsMediaSource
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import org.json.JSONArray
 import org.json.JSONObject
@@ -1482,11 +1482,16 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun createLiveMediaItem(uri: Uri): MediaItem =
-        MediaItem.Builder()
-            .setUri(uri)
-            .setMimeType(MimeTypes.APPLICATION_M3U8)
-            .setLiveConfiguration(
+    private fun createLiveMediaItem(uri: Uri): MediaItem {
+        val builder = MediaItem.Builder().setUri(uri)
+        val path = uri.path.orEmpty().lowercase(java.util.Locale.ROOT)
+        when {
+            path.endsWith(".m3u8") -> builder.setMimeType(MimeTypes.APPLICATION_M3U8)
+            path.endsWith(".mpd") -> builder.setMimeType(MimeTypes.APPLICATION_MPD)
+            path.endsWith(".ism") || path.endsWith(".isml") -> builder.setMimeType(MimeTypes.APPLICATION_SS)
+            // Per URL senza estensione non imporre HLS: Media3 usa il rilevamento automatico.
+        }
+        return builder.setLiveConfiguration(
                 MediaItem.LiveConfiguration.Builder()
                     .setTargetOffsetMs(60_000)
                     .setMinOffsetMs(45_000)
@@ -1496,6 +1501,7 @@ class MainActivity : Activity() {
                     .build()
             )
             .build()
+    }
 
     /**
      * Controllo di salute indipendente dagli eventi ExoPlayer: intercetta anche
@@ -1694,7 +1700,10 @@ class MainActivity : Activity() {
             .setTargetLiveOffsetIncrementOnRebufferMs(15_000)
             .build()
 
-        val mediaSourceFactory = HlsMediaSource.Factory(hlsHttpDataSourceFactory)
+        // Come nell'Extractor, lascia che Media3 riconosca il contenuto: forzare
+        // ogni URL a HLS produce schermo nero con TS/MP4/DASH o endpoint senza manifest HLS.
+        val mediaSourceFactory = DefaultMediaSourceFactory(this)
+            .setDataSourceFactory(hlsHttpDataSourceFactory)
             .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(8))
 
         player = ExoPlayer.Builder(this)
