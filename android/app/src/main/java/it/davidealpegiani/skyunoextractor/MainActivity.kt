@@ -74,7 +74,7 @@ data class TvChannel(
     val name: String,
     val url: String,
     val logo: String = "",
-    var selected: Boolean = true,
+    var selected: Boolean = false,
     var category: String = "Non classificati",
     var tvgId: String = "",
     var tvgName: String = ""
@@ -562,9 +562,9 @@ class MainActivity : FragmentActivity() {
         section("3 · CANALI E SELEZIONE")
         count = label("0 canali importati", CYAN)
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        row.addView(buttonView("Seleziona tutti") { channels.forEach { it.selected = true }; renderChannels() }, LinearLayout.LayoutParams(0, dp(46), 1f))
+        row.addView(buttonView("Seleziona tutti") { channels.forEach { it.selected = true }; persistChannelLibrary(); renderChannels() }, LinearLayout.LayoutParams(0, dp(46), 1f))
         row.addView(space(8), LinearLayout.LayoutParams(dp(8), 1))
-        row.addView(buttonView("Deseleziona") { channels.forEach { it.selected = false }; renderChannels() }, LinearLayout.LayoutParams(0, dp(46), 1f))
+        row.addView(buttonView("Deseleziona") { channels.forEach { it.selected = false }; persistChannelLibrary(); renderChannels() }, LinearLayout.LayoutParams(0, dp(46), 1f))
         root.addView(row)
         button("▦  Gestisci categorie e sottocartelle", false) { showCategoryManager() }
         label("Usa il formato Sezione > Sottosezione, ad esempio Intrattenimento > Cinema.", MUTED, 12f)
@@ -796,7 +796,7 @@ class MainActivity : FragmentActivity() {
                                         reorganized++
                                     }
                                 } else {
-                                    channel.selected = !(channel.name.contains("sky", true) && (channel.name.contains("plus", true) || channel.name.contains("+1")))
+                                    channel.selected = false
                                     channels.add(channel)
                                     added++
                                 }
@@ -1529,7 +1529,7 @@ class MainActivity : FragmentActivity() {
                             if (!knownKeys.add(key)) {
                                 duplicates++
                             } else {
-                                channel.selected = !(channel.name.contains("sky", true) && (channel.name.contains("plus", true) || channel.name.contains("+1")))
+                                channel.selected = false
                                 channels.add(channel)
                                 added++
                             }
@@ -1648,6 +1648,8 @@ class MainActivity : FragmentActivity() {
                         }
                         status.text = "Playlist caricata: ${file.name.substringAfter('_')} · Nuovi canali: $added · Duplicati ignorati: $duplicates"
                         renderChannels()
+                        persistChannelLibrary()
+                        saveCategorySettings()
                     }
                     importInProgress = false
                     finishImportProgress()
@@ -1822,14 +1824,14 @@ class MainActivity : FragmentActivity() {
         // Costruisce una sola mappa degli indici per cartella e antenati.
         // Evita la precedente scansione completa di channels per ogni singola cartella.
         val bulkIndicesByPath = mutableMapOf<String, MutableList<Int>>()
-        if (bulkSelectionMode) {
-            channels.forEachIndexed { index, channel ->
-                val parts = normalizeCategoryPath(channel.category).split(" > ").filter { it.isNotBlank() }
-                var path = ""
-                parts.forEach { part ->
-                    path = if (path.isBlank()) part else "$path > $part"
-                    bulkIndicesByPath.getOrPut(path) { mutableListOf() }.add(index)
-                }
+        // Indici completi per cartella: la selezione di pubblicazione deve includere
+        // tutti i discendenti, anche quelli mostrati nell'altra sezione (selezionati/altri).
+        channels.forEachIndexed { index, channel ->
+            val parts = normalizeCategoryPath(channel.category).split(" > ").filter { it.isNotBlank() }
+            var path = ""
+            parts.forEach { part ->
+                path = if (path.isBlank()) part else "$path > $part"
+                bulkIndicesByPath.getOrPut(path) { mutableListOf() }.add(index)
             }
         }
         selectedHeading.visibility = if (selected.isEmpty()) View.GONE else View.VISIBLE
@@ -1848,6 +1850,7 @@ class MainActivity : FragmentActivity() {
                 buttonTintList = android.content.res.ColorStateList.valueOf(CYAN)
                 setOnCheckedChangeListener { _, checked ->
                     channel.selected = checked
+                    persistChannelLibrary()
                     renderChannels()
                 }
             }
@@ -1934,6 +1937,24 @@ class MainActivity : FragmentActivity() {
                     textSize = 12f
                     setTextColor(CYAN)
                 })
+                run {
+                    val folderIndices = bulkIndicesByPath[node.path].orEmpty()
+                    val selectedInFolder = folderIndices.count { channels.getOrNull(it)?.selected == true }
+                    val allFolderSelected = folderIndices.isNotEmpty() && selectedInFolder == folderIndices.size
+                    val folderSelectionLabel = when {
+                        allFolderSelected -> "☑  Deseleziona"
+                        selectedInFolder > 0 -> "◩  Completa selezione"
+                        else -> "□  Seleziona"
+                    }
+                    header.addView(buttonView(folderSelectionLabel) {
+                        val selectFolder = !allFolderSelected
+                        folderIndices.forEach { index -> channels.getOrNull(index)?.selected = selectFolder }
+                        persistChannelLibrary()
+                        renderChannels()
+                    }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(36)).apply {
+                        leftMargin = dp(8)
+                    })
+                }
                 if (bulkSelectionMode) {
                     val folderIndices = bulkIndicesByPath[node.path].orEmpty()
                     val allFolderSelected = folderIndices.isNotEmpty() &&
@@ -2141,7 +2162,7 @@ class MainActivity : FragmentActivity() {
                     val expanded = JSONArray().apply { expandedSnapshot.forEach { put(it) } }
                     val state = JSONObject().apply {
                         // Mantiene il formato v1: gli archivi già presenti restano leggibili.
-                        put("version", 1)
+                        put("version", 2)
                         put("channels", savedChannels)
                         put("expandedCategories", expanded)
                         put("savedAt", savedAt)
@@ -2193,7 +2214,7 @@ class MainActivity : FragmentActivity() {
                     val category = normalizeCategoryPath(item.optString("category", "Non classificati"))
                         .ifBlank { "Non classificati" }
                     restoredChannels.add(
-                        TvChannel(name, url, item.optString("logo"), item.optBoolean("selected", true),
+                        TvChannel(name, url, item.optString("logo"), if (legacySelectionReset) false else item.optBoolean("selected", false),
                             category, item.optString("tvgId"), item.optString("tvgName"))
                     )
                     restoredCategories.add(category)
@@ -2218,6 +2239,9 @@ class MainActivity : FragmentActivity() {
                     Log.i("DAVIX-ARCHIVE", "Ripristinati " + channels.size + " canali dall’archivio locale")
                     renderChannels()
                     renderSavedPlaylists()
+                    // Migrazione una tantum: gli archivi precedenti partivano tutti selezionati.
+                    // Dalla versione 2 in poi lo stato scelto dall'utente viene mantenuto.
+                    if (legacySelectionReset) persistChannelLibrary()
                 }.onFailure {
                     // Non cancellare o sovrascrivere un archivio illeggibile: serve per diagnosi e recupero.
                     Log.e("DAVIX-ARCHIVE", "Archivio canali non leggibile; file conservato per diagnosi", it)
