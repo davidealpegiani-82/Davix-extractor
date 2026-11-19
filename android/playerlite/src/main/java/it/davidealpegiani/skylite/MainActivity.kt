@@ -772,7 +772,7 @@ class MainActivity : Activity() {
     private fun addChannelItem(target: LinearLayout, group: ChannelSourceGroup, isCompact: Boolean) {
         val channel = preferredSource(group)
         target.addView(
-            buildChannelRow(channel, isCompact, group.sources.size) {
+            buildChannelRow(channel, isCompact, group.sources.size, group.sources.map { it.url }) {
                 if (group.sources.size > 1) showSourcePicker(group) else onCloudChannelClicked(channel)
             },
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
@@ -791,6 +791,11 @@ class MainActivity : Activity() {
         val buckets = LinkedHashMap<String, MutableList<CloudChannel>>()
         items.forEach { channel ->
             val category = channel.category.trim().lowercase(java.util.Locale.ROOT)
+            val searchableType = (channel.category + " " + channel.name + " " + channel.url).lowercase(java.util.Locale.ROOT)
+            val mediaKind = if (
+                Regex("\\b(film|movie|serie|series|vod|on\\s*demand)\\b").containsMatchIn(searchableType) ||
+                Regex("\\b(s[0-9]{1,2}e[0-9]{1,3}|[0-9]{1,2}x[0-9]{1,3})\\b", RegexOption.IGNORE_CASE).containsMatchIn(searchableType)
+            ) "vod" else "live"
             val identity = channel.tvgId.trim().takeIf { it.isNotBlank() }
                 ?.let { "id:" + it.lowercase(java.util.Locale.ROOT) }
                 ?: run {
@@ -800,7 +805,7 @@ class MainActivity : Activity() {
                         .trim().replace(Regex("\\s+"), " ")
                     "name:$normalized"
                 }
-            val key = "$category|$identity"
+            val key = "$mediaKind|$category|$identity"
             buckets.getOrPut(key) { mutableListOf() }.add(channel)
         }
         return buckets.map { (key, sources) ->
@@ -883,6 +888,7 @@ class MainActivity : Activity() {
         channel: CloudChannel,
         isCompact: Boolean,
         sourceCount: Int = 1,
+        sourceUrls: List<String> = listOf(channel.url),
         onClick: () -> Unit
     ): View {
         val selected = selectedChannelForRecovery?.url == channel.url
@@ -926,8 +932,7 @@ class MainActivity : Activity() {
             letterSpacing = 0.06f
             setPadding(0, dp(2), 0, 0)
         })
-        val logicalGroup = groupChannels(cloudChannels).firstOrNull { group -> group.sources.any { it.url == channel.url } }
-        val sharedGuide = epgGuides[channel.url] ?: logicalGroup?.sources?.firstNotNullOfOrNull { epgGuides[it.url] }
+        val sharedGuide = sourceUrls.firstNotNullOfOrNull { epgGuides[it] }
         sharedGuide?.let { guide ->
             val lines = mutableListOf<String>()
             if (guide.nowTitle.isNotBlank()) {
