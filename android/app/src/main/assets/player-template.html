@@ -276,9 +276,11 @@ let selectedSourceByGroup={};
 try{selectedSourceByGroup=JSON.parse(localStorage.getItem(SOURCE_SELECTION_KEY)||'{}')||{}}catch(e){selectedSourceByGroup={}}
 function channelGroupKey(c){
  const category=String(c.category||'Non classificati').trim().toLocaleLowerCase('it');
+ const searchableType=(String(c.category||'')+' '+String(c.name||'')+' '+String(c.url||'')).toLocaleLowerCase('it');
+ const mediaKind=/\b(film|movie|serie|series|vod|on\s*demand)\b/.test(searchableType)||/\b(s[0-9]{1,2}e[0-9]{1,3}|[0-9]{1,2}x[0-9]{1,3})\b/i.test(searchableType)?'vod':'live';
  const tvgId=String(c.tvgId||'').trim().toLocaleLowerCase('it');
  const identity=tvgId?'id:'+tvgId:'name:'+String(c.name||'').toLocaleLowerCase('it').replace(/\b(4k|uhd|fhd|full\s*hd|hd|sd|1080p|720p|2160p)\b/gi,' ').replace(/[^\p{L}\p{N}]+/gu,' ').trim().replace(/\s+/g,' ');
- return category+'|'+identity;
+ return mediaKind+'|'+category+'|'+identity;
 }
 function sourceQuality(c){
  const value=(String(c.name||'')+' '+String(c.url||'')).toLowerCase();
