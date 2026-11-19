@@ -61,5 +61,5 @@ assert.ok(rendererStart >= 0 && rendererEnd > rendererStart, "Folder renderer mu
 const renderer = source.slice(rendererStart, rendererEnd);
 assert.ok(renderer.includes("data class FolderNode"), "Category paths must be rendered as a folder tree");
 assert.ok(renderer.includes("renderFolderNode(child, depth + 1)"), "Nested categories must expand as real subfolders");
-assert.ok(renderer.includes("countChannels(node)"), "Folder counts must include nested descendants");
+assert.ok(renderer.includes("var totalCount: Int = 0") && renderer.includes("node.totalCount++") && renderer.includes("val total = node.totalCount"), "Folder counts must include nested descendants without repeated recursive scans");
 console.log("DAVIX hierarchical URL category checks passed.");

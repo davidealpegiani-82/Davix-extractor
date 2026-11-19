@@ -87,6 +87,9 @@ class MainActivity : FragmentActivity() {
     private val archiveExecutor = Executors.newSingleThreadExecutor { task ->
         Thread(task, "DAVIX-Archive").apply { isDaemon = true }
     }
+    // Accorpa le modifiche ravvicinate: evita copie integrali ripetute sul thread UI.
+    private val archiveDebounceHandler = Handler(Looper.getMainLooper())
+    private var pendingArchiveWrite: Runnable? = null
     private val categories = mutableListOf("Intrattenimento", "Sport", "Cinema", "Documentari", "Musica", "XXX", "Non classificati")
     private val categoryPrefs by lazy { getSharedPreferences("davix_extractor_categories", MODE_PRIVATE) }
     // Selezione multipla separata dalla selezione di esportazione.
@@ -1987,6 +1990,7 @@ class MainActivity : FragmentActivity() {
         // Costruisce una sola mappa degli indici per cartella e antenati.
         // Evita la precedente scansione completa di channels per ogni singola cartella.
         val bulkIndicesByPath = mutableMapOf<String, MutableList<Int>>()
+        val selectedCountsByPath = mutableMapOf<String, Int>()
         // Indici completi per cartella: la selezione di pubblicazione deve includere
         // tutti i discendenti, anche quelli mostrati nell'altra sezione (selezionati/altri).
         channels.forEachIndexed { index, channel ->
@@ -1995,6 +1999,7 @@ class MainActivity : FragmentActivity() {
             parts.forEach { part ->
                 path = if (path.isBlank()) part else "$path > $part"
                 bulkIndicesByPath.getOrPut(path) { mutableListOf() }.add(index)
+                if (channel.selected) selectedCountsByPath[path] = (selectedCountsByPath[path] ?: 0) + 1
             }
         }
         selectedHeading.visibility = if (selected.isEmpty()) View.GONE else View.VISIBLE
@@ -2052,7 +2057,8 @@ class MainActivity : FragmentActivity() {
                 val name: String,
                 val path: String,
                 val entries: MutableList<IndexedValue<TvChannel>> = mutableListOf(),
-                val children: MutableMap<String, FolderNode> = linkedMapOf()
+                val children: MutableMap<String, FolderNode> = linkedMapOf(),
+                var totalCount: Int = 0
             )
             val rootNode = FolderNode("", "")
             items.forEach { entry ->
@@ -2062,17 +2068,15 @@ class MainActivity : FragmentActivity() {
                 parts.forEach { part ->
                     val path = if (node.path.isBlank()) part else "${node.path} > $part"
                     node = node.children.getOrPut(part) { FolderNode(part, path) }
+                    node.totalCount++
                 }
                 node.entries.add(entry)
             }
 
-            fun countChannels(node: FolderNode): Int =
-                node.entries.size + node.children.values.sumOf { countChannels(it) }
-
             fun renderFolderNode(node: FolderNode, depth: Int) {
                 val key = "$prefix:${node.path}"
                 val expanded = key in expandedCategoryPaths
-                val total = countChannels(node)
+                val total = node.totalCount
                 val header = LinearLayout(this).apply {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
@@ -2104,7 +2108,7 @@ class MainActivity : FragmentActivity() {
                 })
                 run {
                     val folderIndices = bulkIndicesByPath[node.path].orEmpty()
-                    val selectedInFolder = folderIndices.count { channels.getOrNull(it)?.selected == true }
+                    val selectedInFolder = selectedCountsByPath[node.path] ?: 0
                     val allFolderSelected = folderIndices.isNotEmpty() && selectedInFolder == folderIndices.size
                     val folderSelectionLabel = when {
                         allFolderSelected -> "☑  Deseleziona"
@@ -2299,54 +2303,64 @@ class MainActivity : FragmentActivity() {
      * Cattura uno snapshot immutabile sul main thread e delega serializzazione e I/O
      * al writer dedicato. La coda FIFO mantiene l'ordine degli snapshot.
      */
-    private fun persistChannelLibrary() {
-        val channelSnapshot = channels.map { channel ->
-            ChannelArchiveEntry(
-                channel.name, channel.url, channel.logo, channel.selected,
-                channel.category, channel.tvgId, channel.tvgName
-            )
-        }
-        val expandedSnapshot = expandedCategoryPaths.toList()
-        val savedAt = System.currentTimeMillis()
-
-        runCatching {
-            archiveExecutor.execute {
-                runCatching {
-                    val savedChannels = JSONArray()
-                    channelSnapshot.forEach { channel ->
-                        savedChannels.put(JSONObject().apply {
-                            put("name", channel.name)
-                            put("url", channel.url)
-                            put("logo", channel.logo)
-                            put("selected", channel.selected)
-                            put("category", channel.category)
-                            put("tvgId", channel.tvgId)
-                            put("tvgName", channel.tvgName)
-                        })
-                    }
-                    val expanded = JSONArray().apply { expandedSnapshot.forEach { put(it) } }
-                    val state = JSONObject().apply {
-                        // Versione 2: conserva in modo esplicito la selezione di pubblicazione.
-                        put("version", 2)
-                        put("channels", savedChannels)
-                        put("expandedCategories", expanded)
-                        put("savedAt", savedAt)
-                    }
-                    val atomicFile = channelLibraryAtomicFile()
-                    val output = atomicFile.startWrite()
-                    try {
-                        output.write(state.toString().toByteArray(StandardCharsets.UTF_8))
-                        atomicFile.finishWrite(output)
-                    } catch (error: Throwable) {
-                        atomicFile.failWrite(output)
-                        throw error
-                    }
-                }.onFailure {
-                    Log.w("DAVIX-ARCHIVE", "Salvataggio archivio canali non riuscito; la copia precedente viene conservata", it)
-                }
+    private fun persistChannelLibrary(immediate: Boolean = false) {
+        pendingArchiveWrite?.let { archiveDebounceHandler.removeCallbacks(it) }
+        val writeSnapshot = Runnable {
+            pendingArchiveWrite = null
+            val channelSnapshot = channels.map { channel ->
+                ChannelArchiveEntry(
+                    channel.name, channel.url, channel.logo, channel.selected,
+                    channel.category, channel.tvgId, channel.tvgName
+                )
             }
-        }.onFailure {
-            Log.w("DAVIX-ARCHIVE", "Impossibile accodare il salvataggio dell’archivio canali", it)
+            val expandedSnapshot = expandedCategoryPaths.toList()
+            val savedAt = System.currentTimeMillis()
+    
+            runCatching {
+                archiveExecutor.execute {
+                    runCatching {
+                        val savedChannels = JSONArray()
+                        channelSnapshot.forEach { channel ->
+                            savedChannels.put(JSONObject().apply {
+                                put("name", channel.name)
+                                put("url", channel.url)
+                                put("logo", channel.logo)
+                                put("selected", channel.selected)
+                                put("category", channel.category)
+                                put("tvgId", channel.tvgId)
+                                put("tvgName", channel.tvgName)
+                            })
+                        }
+                        val expanded = JSONArray().apply { expandedSnapshot.forEach { put(it) } }
+                        val state = JSONObject().apply {
+                            // Versione 2: conserva in modo esplicito la selezione di pubblicazione.
+                            put("version", 2)
+                            put("channels", savedChannels)
+                            put("expandedCategories", expanded)
+                            put("savedAt", savedAt)
+                        }
+                        val atomicFile = channelLibraryAtomicFile()
+                        val output = atomicFile.startWrite()
+                        try {
+                            output.write(state.toString().toByteArray(StandardCharsets.UTF_8))
+                            atomicFile.finishWrite(output)
+                        } catch (error: Throwable) {
+                            atomicFile.failWrite(output)
+                            throw error
+                        }
+                    }.onFailure {
+                        Log.w("DAVIX-ARCHIVE", "Salvataggio archivio canali non riuscito; la copia precedente viene conservata", it)
+                    }
+                }
+            }.onFailure {
+                Log.w("DAVIX-ARCHIVE", "Impossibile accodare il salvataggio dell’archivio canali", it)
+            }
+        }
+        if (immediate) {
+            writeSnapshot.run()
+        } else {
+            pendingArchiveWrite = writeSnapshot
+            archiveDebounceHandler.postDelayed(writeSnapshot, 350L)
         }
     }
 
@@ -2618,7 +2632,7 @@ class MainActivity : FragmentActivity() {
     }
 
     override fun onStop() {
-        persistChannelLibrary()
+        persistChannelLibrary(immediate = true)
         saveCategorySettings()
         retryHandler.removeCallbacks(playbackInfoTask)
         // Non lasciare il flusso attivo quando l'app passa davvero in background.
