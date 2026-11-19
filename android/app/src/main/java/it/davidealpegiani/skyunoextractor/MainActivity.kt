@@ -2161,7 +2161,7 @@ class MainActivity : FragmentActivity() {
                     }
                     val expanded = JSONArray().apply { expandedSnapshot.forEach { put(it) } }
                     val state = JSONObject().apply {
-                        // Mantiene il formato v1: gli archivi già presenti restano leggibili.
+                        // Versione 2: conserva in modo esplicito la selezione di pubblicazione.
                         put("version", 2)
                         put("channels", savedChannels)
                         put("expandedCategories", expanded)
@@ -2203,6 +2203,7 @@ class MainActivity : FragmentActivity() {
                 val state = channelLibraryAtomicFile().openRead().bufferedReader(StandardCharsets.UTF_8).use {
                     JSONObject(it.readText())
                 }
+                val legacySelectionReset = state.optInt("version", 1) < 2
                 val savedChannels = state.optJSONArray("channels") ?: JSONArray()
                 val restoredChannels = ArrayList<TvChannel>(savedChannels.length())
                 val restoredCategories = LinkedHashSet<String>()
