@@ -1304,16 +1304,18 @@ class MainActivity : FragmentActivity() {
         val seriesPath = path.contains("/series/")
         val moviePath = path.contains("/movie/") || path.contains("/movies/")
         val seriesHint = seriesPath ||
-            group.contains("serie") || group.contains("series") || group.contains("tv show") ||
+            (group.contains("serie") && !group.contains("serie a") && !group.contains("serie b")) ||
+            group.contains("series") || group.contains("tv show") ||
             Regex("\\bS[0-9]{1,2}E[0-9]{1,2}\\b", RegexOption.IGNORE_CASE).containsMatchIn(name)
-        val movieHint = moviePath ||
-            group.contains("film") || group.contains("movie") ||
-            (group.contains("cinema") && !group.contains("live"))
+        // "Cinema" da solo può indicare un canale lineare (es. Sky Cinema):
+        // per riconoscere un VOD usiamo "Film/Movie" o il percorso /movie/.
+        val movieHint = moviePath || group.contains("film") || group.contains("movie")
         val vodPath = path.contains("/vod/") || seriesPath || moviePath
         val vodExtension = Regex("\\.(mp4|mkv|avi|mov|m4v|wmv|webm)(?:$|[?&])").containsMatchIn(url)
         val explicitVod = vodPath || token("vod") || has("video on demand", "on demand")
         val explicitLive = path.contains("/live/") || group.contains("live") ||
-            (Regex("\\.(ts|m3u8)(?:$|[?&])").containsMatchIn(url) && !vodPath)
+            (Regex("\\.(ts|m3u8)(?:$|[?&])").containsMatchIn(url) && !vodPath &&
+                !seriesHint && !movieHint && !token("vod") && !has("video on demand", "on demand"))
         val isVod = !explicitLive && (explicitVod || seriesHint || movieHint || vodExtension)
 
         if (isVod) {
