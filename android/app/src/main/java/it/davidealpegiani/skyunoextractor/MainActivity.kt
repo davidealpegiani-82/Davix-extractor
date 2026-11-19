@@ -164,7 +164,6 @@ class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         loadCategorySettings()
-        restoreChannelLibrary()
         window.statusBarColor = BG
         window.navigationBarColor = BG
         window.decorView.systemUiVisibility = 0
@@ -278,6 +277,7 @@ class MainActivity : FragmentActivity() {
         }
         player.playWhenReady = false
         buildInterface()
+        restoreChannelLibraryAsync()
         castInitWarning?.let { status.text = "Google Cast non disponibile; riproduzione locale attiva." }
         player.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
@@ -2164,35 +2164,66 @@ class MainActivity : FragmentActivity() {
         }
     }
 
-    /** Ripristina i canali prima di costruire l’interfaccia. AtomicFile recupera il backup di una scrittura interrotta. */
-    private fun restoreChannelLibrary() {
+    /**
+     * Ripristina l'archivio fuori dal thread UI: le playlist possono contenere
+     * migliaia di canali e il parsing JSON non deve ritardare la prima schermata.
+     * Le strutture condivise vengono aggiornate soltanto sul main thread.
+     */
+    private fun restoreChannelLibraryAsync() {
         val file = channelLibraryFile()
         val interruptedWriteBackup = java.io.File(file.path + ".bak")
         if (!file.isFile && !interruptedWriteBackup.isFile) return
-        runCatching {
-            val state = channelLibraryAtomicFile().openRead().bufferedReader(StandardCharsets.UTF_8).use {
-                JSONObject(it.readText())
+
+        val restoreExecutor = Executors.newSingleThreadExecutor { task ->
+            Thread(task, "DAVIX-Restore").apply { isDaemon = true }
+        }
+        restoreExecutor.execute {
+            val restored = runCatching {
+                val state = channelLibraryAtomicFile().openRead().bufferedReader(StandardCharsets.UTF_8).use {
+                    JSONObject(it.readText())
+                }
+                val savedChannels = state.optJSONArray("channels") ?: JSONArray()
+                val restoredChannels = ArrayList<TvChannel>(savedChannels.length())
+                val restoredCategories = LinkedHashSet<String>()
+                for (i in 0 until savedChannels.length()) {
+                    val item = savedChannels.optJSONObject(i) ?: continue
+                    val name = item.optString("name").trim()
+                    val url = item.optString("url").trim()
+                    if (name.isBlank() || !(url.startsWith("https://", true) || url.startsWith("http://", true))) continue
+                    val category = normalizeCategoryPath(item.optString("category", "Non classificati"))
+                        .ifBlank { "Non classificati" }
+                    restoredChannels.add(
+                        TvChannel(name, url, item.optString("logo"), item.optBoolean("selected", true),
+                            category, item.optString("tvgId"), item.optString("tvgName"))
+                    )
+                    restoredCategories.add(category)
+                }
+                val expanded = state.optJSONArray("expandedCategories") ?: JSONArray()
+                val restoredExpanded = buildSet {
+                    for (i in 0 until expanded.length()) {
+                        expanded.optString(i).takeIf { it.isNotBlank() }?.let { add(it) }
+                    }
+                }
+                Triple(restoredChannels, restoredCategories, restoredExpanded)
             }
-            val savedChannels = state.optJSONArray("channels") ?: JSONArray()
-            val restored = mutableListOf<TvChannel>()
-            for (i in 0 until savedChannels.length()) {
-                val item = savedChannels.optJSONObject(i) ?: continue
-                val name = item.optString("name").trim()
-                val url = item.optString("url").trim()
-                if (name.isBlank() || !(url.startsWith("https://", true) || url.startsWith("http://", true))) continue
-                val category = normalizeCategoryPath(item.optString("category", "Non classificati")).ifBlank { "Non classificati" }
-                restored.add(TvChannel(name, url, item.optString("logo"), item.optBoolean("selected", true), category, item.optString("tvgId"), item.optString("tvgName")))
-                if (category !in categories) categories.add(category)
+
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                restored.onSuccess { (restoredChannels, restoredCategories, restoredExpanded) ->
+                    channels.clear()
+                    channels.addAll(restoredChannels)
+                    restoredCategories.forEach { if (it !in categories) categories.add(it) }
+                    expandedCategoryPaths.clear()
+                    expandedCategoryPaths.addAll(restoredExpanded)
+                    Log.i("DAVIX-ARCHIVE", "Ripristinati " + channels.size + " canali dall’archivio locale")
+                    renderChannels()
+                    renderSavedPlaylists()
+                }.onFailure {
+                    // Non cancellare o sovrascrivere un archivio illeggibile: serve per diagnosi e recupero.
+                    Log.e("DAVIX-ARCHIVE", "Archivio canali non leggibile; file conservato per diagnosi", it)
+                }
+                restoreExecutor.shutdown()
             }
-            channels.clear()
-            channels.addAll(restored)
-            expandedCategoryPaths.clear()
-            val expanded = state.optJSONArray("expandedCategories") ?: JSONArray()
-            for (i in 0 until expanded.length()) expanded.optString(i).takeIf { it.isNotBlank() }?.let { expandedCategoryPaths.add(it) }
-            Log.i("DAVIX-ARCHIVE", "Ripristinati " + channels.size + " canali dall’archivio locale")
-        }.onFailure {
-            // Non cancellare o sovrascrivere un archivio illeggibile: serve per diagnosi e recupero.
-            Log.e("DAVIX-ARCHIVE", "Archivio canali non leggibile; file conservato per diagnosi", it)
         }
     }
 
