@@ -794,7 +794,7 @@ class MainActivity : FragmentActivity() {
                                 }
                                 val existingChannelsByKey = channels.associateBy {
                                     it.name.lowercase(Locale.ROOT) + "|" + it.url
-                                }
+                                }.toMutableMap()
                                 var added = 0
                                 var duplicates = 0
                                 var reorganized = 0
