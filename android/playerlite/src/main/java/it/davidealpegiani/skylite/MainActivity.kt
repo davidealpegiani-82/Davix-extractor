@@ -46,6 +46,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 private data class CloudChannel(val name: String, val url: String, val logo: String = "", val category: String = "Non classificati", val tvgId: String = "", val tvgName: String = "")
+private data class ChannelSourceGroup(val key: String, val name: String, val sources: List<CloudChannel>)
 
 @UnstableApi
 class MainActivity : Activity() {
@@ -151,6 +152,7 @@ class MainActivity : Activity() {
     private val expandedCategoryPaths = mutableSetOf<String>()
     private val favoriteUrls = mutableSetOf<String>()
     private val playerPrefs by lazy { getSharedPreferences("davix_player_preferences", MODE_PRIVATE) }
+    private val selectedSourceByGroup = mutableMapOf<String, String>()
     private var lastAuthorizationCheckAt = 0L
     private var lastChannelClickName: String? = null
     private var lastChannelClickAt = 0L
@@ -599,6 +601,9 @@ class MainActivity : Activity() {
         for (i in 0 until categoryArray.length()) categoryArray.optString(i).trim().takeIf { it.isNotBlank() }?.let { cloudCategories.add(it) }
         favoriteUrls.clear()
         favoriteUrls.addAll(playerPrefs.getStringSet("favorite_urls", emptySet()).orEmpty())
+        selectedSourceByGroup.clear()
+        runCatching { JSONObject(playerPrefs.getString("selected_source_by_group", "{}") ?: "{}") }
+            .getOrNull()?.let { saved -> saved.keys().forEach { key -> saved.optString(key).takeIf { it.isNotBlank() }?.let { selectedSourceByGroup[key] = it } } }
         val array = config?.optJSONArray("channels") ?: JSONArray()
         for (i in 0 until array.length()) {
             val item = array.optJSONObject(i) ?: continue
@@ -658,10 +663,11 @@ class MainActivity : Activity() {
             .sortedBy { it.lowercase() }
         val rendered = mutableSetOf<String>()
 
-        val favorites = cloudChannels.filter { it.url in favoriteUrls }
-        if (favorites.isNotEmpty()) {
-            addCategoryFolder(target, "★ Preferiti", "special:favorites", favorites, isCompact)
-            rendered.addAll(favorites.map { it.url })
+        val favoriteGroups = groupChannels(cloudChannels).filter { group -> group.sources.any { it.url in favoriteUrls } }
+        if (favoriteGroups.isNotEmpty()) {
+            val favoriteSources = favoriteGroups.flatMap { it.sources }
+            addCategoryFolder(target, "★ Preferiti", "special:favorites", favoriteSources, isCompact)
+            rendered.addAll(favoriteSources.map { it.url })
         }
 
         paths.forEach { path ->
@@ -734,7 +740,7 @@ class MainActivity : Activity() {
             bottomMargin = dp(4)
         })
         if (expanded) {
-            items.forEach { channel -> addChannelItem(target, channel, isCompact) }
+            groupChannels(items).forEach { group -> addChannelItem(target, group, isCompact) }
         }
     }
 
@@ -763,17 +769,111 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun addChannelItem(target: LinearLayout, channel: CloudChannel, isCompact: Boolean) {
+    private fun addChannelItem(target: LinearLayout, group: ChannelSourceGroup, isCompact: Boolean) {
+        val channel = preferredSource(group)
         target.addView(
-            buildChannelRow(channel, isCompact) { onCloudChannelClicked(channel) },
+            buildChannelRow(channel, isCompact, group.sources.size, group.sources.map { it.url }) {
+                if (group.sources.size > 1) showSourcePicker(group) else onCloudChannelClicked(channel)
+            },
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                 bottomMargin = if (isTvDevice()) dp(8) else dp(6)
             }
         )
     }
 
+    /**
+     * Raggruppa solo canali chiaramente riconducibili allo stesso servizio.
+     * Categoria e tipo restano parte della chiave; LIVE e VOD non vengono mai
+     * accorpati. tvg-id prevale sul nome, mentre il nome viene normalizzato
+     * rimuovendo esclusivamente etichette tecniche di qualità.
+     */
+    private fun groupChannels(items: List<CloudChannel>): List<ChannelSourceGroup> {
+        val buckets = LinkedHashMap<String, MutableList<CloudChannel>>()
+        items.forEach { channel ->
+            val category = channel.category.trim().lowercase(java.util.Locale.ROOT)
+            val searchableType = (channel.category + " " + channel.name + " " + channel.url).lowercase(java.util.Locale.ROOT)
+            val mediaKind = if (
+                Regex("\\b(film|movie|serie|series|vod|on\\s*demand)\\b").containsMatchIn(searchableType) ||
+                Regex("\\b(s[0-9]{1,2}e[0-9]{1,3}|[0-9]{1,2}x[0-9]{1,3})\\b", RegexOption.IGNORE_CASE).containsMatchIn(searchableType)
+            ) "vod" else "live"
+            val identity = channel.tvgId.trim().takeIf { it.isNotBlank() }
+                ?.let { "id:" + it.lowercase(java.util.Locale.ROOT) }
+                ?: run {
+                    val normalized = channel.name.lowercase(java.util.Locale.ROOT)
+                        .replace(Regex("\\b(4k|uhd|fhd|full\\s*hd|hd|sd|1080p|720p|2160p)\\b", RegexOption.IGNORE_CASE), " ")
+                        .replace(Regex("[^\\p{L}\\p{N}]+"), " ")
+                        .trim().replace(Regex("\\s+"), " ")
+                    "name:$normalized"
+                }
+            val key = "$mediaKind|$category|$identity"
+            buckets.getOrPut(key) { mutableListOf() }.add(channel)
+        }
+        return buckets.map { (key, sources) ->
+            ChannelSourceGroup(key, sources.first().name, sources.distinctBy { it.url })
+        }
+    }
+
+    private fun preferredSource(group: ChannelSourceGroup): CloudChannel {
+        val savedUrl = selectedSourceByGroup[group.key]
+        group.sources.firstOrNull { it.url == savedUrl }?.let { return it }
+        return group.sources.maxWithOrNull(
+            compareBy<CloudChannel> { sourceQualityScore(it) }
+                .thenBy { if (it.tvgId.isNotBlank()) 1 else 0 }
+                .thenBy { if (it.logo.isNotBlank()) 1 else 0 }
+                .thenByDescending { -group.sources.indexOf(it) }
+        ) ?: group.sources.first()
+    }
+
+    private fun sourceQualityScore(channel: CloudChannel): Int {
+        val value = (channel.name + " " + channel.url).lowercase(java.util.Locale.ROOT)
+        return when {
+            Regex("\\b(4k|uhd|2160p)\\b").containsMatchIn(value) -> 4
+            Regex("\\b(fhd|full\\s*hd|1080p)\\b").containsMatchIn(value) -> 3
+            Regex("\\bhd\\b|720p").containsMatchIn(value) -> 2
+            Regex("\\bsd\\b|576p|480p").containsMatchIn(value) -> 1
+            else -> 0
+        }
+    }
+
+    private fun sourceLabel(channel: CloudChannel, index: Int): String {
+        val value = (channel.name + " " + channel.url).lowercase(java.util.Locale.ROOT)
+        val quality = when {
+            Regex("\\b(4k|uhd|2160p)\\b").containsMatchIn(value) -> "4K / UHD"
+            Regex("\\b(fhd|full\\s*hd|1080p)\\b").containsMatchIn(value) -> "Full HD"
+            Regex("\\bhd\\b|720p").containsMatchIn(value) -> "HD"
+            Regex("\\bsd\\b|576p|480p").containsMatchIn(value) -> "SD"
+            else -> "Sorgente ${index + 1}"
+        }
+        val host = runCatching { Uri.parse(channel.url).host }.getOrNull().orEmpty()
+        return if (host.isBlank()) quality else "$quality · $host"
+    }
+
+    private fun showSourcePicker(group: ChannelSourceGroup) {
+        val current = preferredSource(group)
+        val labels = group.sources.mapIndexed { index, source ->
+            (if (source.url == current.url) "✓  " else "") + sourceLabel(source, index)
+        }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle(group.name + " · " + group.sources.size + " sorgenti")
+            .setSingleChoiceItems(labels, group.sources.indexOfFirst { it.url == current.url }) { dialog, which ->
+                val chosen = group.sources.getOrNull(which) ?: return@setSingleChoiceItems
+                selectedSourceByGroup[group.key] = chosen.url
+                val saved = JSONObject()
+                selectedSourceByGroup.forEach { (key, url) -> saved.put(key, url) }
+                playerPrefs.edit().putString("selected_source_by_group", saved.toString()).apply()
+                dialog.dismiss()
+                renderCloudChannels()
+                onCloudChannelClicked(chosen)
+            }
+            .setNegativeButton("Annulla", null)
+            .show()
+    }
+
     private fun toggleFavorite(channel: CloudChannel) {
-        if (!favoriteUrls.add(channel.url)) favoriteUrls.remove(channel.url)
+        val group = groupChannels(cloudChannels).firstOrNull { candidate -> candidate.sources.any { it.url == channel.url } }
+        val urls = group?.sources?.map { it.url }.orEmpty().ifEmpty { listOf(channel.url) }
+        val remove = urls.any { it in favoriteUrls }
+        if (remove) favoriteUrls.removeAll(urls.toSet()) else favoriteUrls.addAll(urls)
         playerPrefs.edit().putStringSet("favorite_urls", favoriteUrls.toSet()).apply()
         renderCloudChannels()
         if (isTvDevice()) {
@@ -790,6 +890,8 @@ class MainActivity : Activity() {
     private fun buildChannelRow(
         channel: CloudChannel,
         isCompact: Boolean,
+        sourceCount: Int = 1,
+        sourceUrls: List<String> = listOf(channel.url),
         onClick: () -> Unit
     ): View {
         val selected = selectedChannelForRecovery?.url == channel.url
@@ -825,7 +927,16 @@ class MainActivity : Activity() {
             ellipsize = android.text.TextUtils.TruncateAt.END
         }
         labels.addView(name)
-        epgGuides[channel.url]?.let { guide ->
+        if (sourceCount > 1) labels.addView(TextView(this).apply {
+            text = "$sourceCount SORGENTI DISPONIBILI · APRI PER SCEGLIERE"
+            setTextColor(Color.rgb(0, 190, 220))
+            textSize = if (isTvDevice()) 9f else 8f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            letterSpacing = 0.06f
+            setPadding(0, dp(2), 0, 0)
+        })
+        val sharedGuide = sourceUrls.firstNotNullOfOrNull { epgGuides[it] }
+        sharedGuide?.let { guide ->
             val lines = mutableListOf<String>()
             if (guide.nowTitle.isNotBlank()) {
                 val times = if (guide.nowStartMs > 0L && guide.nowStopMs > 0L) EpgGuideManager.formatTime(guide.nowStartMs) + "–" + EpgGuideManager.formatTime(guide.nowStopMs) else ""
