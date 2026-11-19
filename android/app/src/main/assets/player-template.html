@@ -344,6 +344,7 @@ function renderChannels(autoStart=false,target=list){
   target.appendChild(row)
  };
  const paths=Array.from(new Set([...CATEGORIES,...visibleChannels.map(x=>x.channel.category||'Non classificati')].map(x=>String(x||'').split('>').map(y=>y.trim()).filter(Boolean).join(' > ')).filter(x=>x&&!/^non classificati$/i.test(x)))).filter(path=>visibleChannels.some(x=>String(x.channel.category||'').trim().toLowerCase()===path.toLowerCase())).sort((a,b)=>a.localeCompare(b,'it'));
+ const roots=[...new Set(paths.map(path=>path.split('>').map(part=>part.trim()).filter(Boolean)[0]).filter(Boolean))];
  const rendered=new Set();
  const addFolder=(title,key,items)=>{const expanded=expandedCategoryKey===key;const folder=document.createElement('button');folder.type='button';folder.className='category-title';folder.dataset.categoryKey=key;folder.textContent=(expanded?'▾  ':'▸  ')+title.toUpperCase()+'    ·  '+items.length;folder.setAttribute('aria-expanded',String(expanded));folder.addEventListener('click',()=>{expandedCategoryKey=expanded?'':key;renderChannels(false,target);const next=[...target.querySelectorAll('.category-title')].find(button=>button.dataset.categoryKey===key);if(next)next.focus()});target.appendChild(folder);if(expanded)items.forEach(appendChannel)};
  const favorites=groups.filter(g=>g.sources.some(x=>favoriteUrls.has(x.channel.url)));if(favorites.length){addFolder('★ Preferiti','special:favorites',favorites);favorites.forEach(g=>g.sources.forEach(x=>rendered.add(x.channel.url)))}
