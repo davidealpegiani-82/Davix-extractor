@@ -6,10 +6,10 @@ const source = readFileSync("android/app/src/main/java/it/davidealpegiani/skyuno
 assert.ok(source.includes("private fun importUris(uris: List<Uri>)"), "File import entry point must remain available");
 assert.ok(source.includes("val parsedFiles = mutableListOf<List<TvChannel>>()"), "Multi-file import must retain parsed channels only");
 assert.ok(source.includes("parsedFiles.add(found)"), "Parsed channel batches must be retained without source byte arrays");
-assert.ok(source.includes("val batchSize = 200"), "Channel insertion must be split into bounded UI batches");
-assert.equal((source.match(/val batchSize = 200/g) || []).length, 2, "Both file and remote URL imports must use bounded UI batches");
-assert.ok(source.includes("importHandler.postDelayed(this, 1L)"), "Large imports must yield between UI batches");
-assert.ok(source.includes("val knownCategories = categories.toHashSet()"), "Category deduplication must use indexed membership during bulk import");
+assert.ok((source.match(/android.os.SystemClock.uptimeMillis\(\) - batchStartedAt < 12L/g) || []).length >= 3, "URL, file and saved-playlist imports must use time-bounded UI batches");
+assert.ok((source.match(/importHandler.postDelayed\(this, 8L\)/g) || []).length >= 3, "Large imports must yield between UI batches");
+assert.ok(source.includes("val knownCategoriesSnapshot = categories.toHashSet()"), "Category membership must be snapshotted before background import processing");
+assert.ok(source.includes('"DAVIX-Playlist-Analysis"') && source.includes('"DAVIX-File-Classification"'), "CPU-heavy URL and file classification must run off the UI thread");
 assert.ok(!source.includes("mutableListOf<Triple<String, ByteArray, List<TvChannel>>>"), "Do not retain every source file byte array alongside parsed channels");
 assert.ok(source.includes("Executors.newSingleThreadExecutor"), "Archive writes must use a single ordered background writer");
 assert.ok(source.includes("private data class ChannelArchiveEntry"), "Archive worker must receive immutable channel snapshots");
