@@ -813,21 +813,22 @@ class MainActivity : FragmentActivity() {
                                             android.os.SystemClock.uptimeMillis() - batchStartedAt < 12L
                                         ) {
                                             val item = prepared[processed]
+                                            val channel = item.channel
                                             if (item.duplicate) {
                                                 duplicates++
                                                 val existing = existingChannelsByKey[item.key]
                                                 val oldPath = normalizeCategoryPath(existing?.category.orEmpty())
                                                 if (existing != null &&
                                                     isAutomaticallyClassifiedUrlCategory(oldPath) &&
-                                                    existing.category != item.category
+                                                    existing.category != channel.category
                                                 ) {
-                                                    existing.category = item.category
+                                                    existing.category = channel.category
                                                     reorganized++
                                                 }
                                             } else {
-                                                item.channel.selected = false
-                                                channels.add(item.channel)
-                                                existingChannelsByKey[item.key] = item.channel
+                                                channel.selected = false
+                                                channels.add(channel)
+                                                existingChannelsByKey[item.key] = channel
                                                 added++
                                             }
                                             processed++
