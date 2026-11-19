@@ -1325,8 +1325,6 @@ class MainActivity : FragmentActivity() {
         val seriesPath = path.contains("/series/") || path.contains("/serie/")
         val moviePath = path.contains("/movie/") || path.contains("/movies/") || path.contains("/film/")
         val vodPath = path.contains("/vod/") || seriesPath || moviePath
-        val vodGroup = has("serie", "series", "tv show", "tvshows", "film", "films", "movie", "movies", "video on demand", "on demand") ||
-            token("vod")
         val vodExtension = Regex("\\.(mp4|mkv|avi|mov|m4v|wmv|webm)(?:$|[?&])").containsMatchIn(url)
         val seriesEvidence = seriesPath || episodeEvidence ||
             has("serie tv", "serie complete", "stagioni complete", "tv series", "tv show", "tv shows", "series")
@@ -1371,7 +1369,6 @@ class MainActivity : FragmentActivity() {
 
         // Un'etichetta live è considerata valida solo in assenza di segnali VOD.
         // L'estensione .m3u8/.ts da sola non basta: alcuni provider la usano per VOD.
-        val explicitLive = (explicitLiveLabel || liveStreamExtension) && !strongVod
         val liveCategory = when {
             has("xxx", "adult", "adulti", "erotic") -> "Adult"
             has("calcio", "football", "soccer", "serie a", "serie b", "champions league", "europa league", "conference league", "premier league", "bundesliga", "ligue 1", "coppa italia") -> "Sport > Calcio"
