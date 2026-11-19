@@ -23,6 +23,10 @@ for (const required of [
   'path.contains("/live/")',
   'path.contains("/movie/")',
   'path.contains("/series/")',
+  'episodePattern.containsMatchIn(name)',
+  'episodePattern.containsMatchIn(url)',
+  'val strongVod = vodPath || seriesEvidence || movieEvidence',
+  'val isVod = strongVod || (liveStreamExtension && (seriesEvidence || movieEvidence))',
   'VOD > SERIE > $genre',
   'VOD > FILM > $genre',
   'LIVE > $liveCategory',
@@ -36,8 +40,10 @@ for (const required of [
   assert.ok(classifier.includes(required), `URL classifier is missing expected rule: ${required}`);
 }
 assert.ok(classifier.includes('token("vod")'), "VOD marker must use token matching to avoid substring false positives");
-assert.ok(classifier.includes("val isSeries = seriesHint && !moviePath"), "A movie path must not be mistaken for a series");
-assert.ok(classifier.includes("!vodPath"), "HLS VOD paths must not be mistaken for LIVE merely because they use .m3u8");
+assert.ok(classifier.includes("val isSeries = seriesEvidence && !moviePath"), "A movie path must not be mistaken for a series");
+assert.ok(classifier.includes("val isVod = strongVod || (liveStreamExtension && (seriesEvidence || movieEvidence))"), "Episode and VOD evidence must override generic LIVE labels and stream extensions");
+assert.ok(classifier.includes("explicitLiveLabel || liveStreamExtension") === false, "Generic LIVE labels must not override strong VOD evidence");
+assert.ok(classifier.includes("val vodPath = path.contains(\"/vod/\") || seriesPath || moviePath") && classifier.includes("val strongVod = vodPath || seriesEvidence || movieEvidence"), "HLS VOD paths must be treated as strong VOD evidence even when they use .m3u8");
 assert.ok(!classifier.includes('return normalizeCategoryPath(channel.category)'), "Provider group-title must not be copied blindly as a new folder");
 
 const autoStart = source.indexOf("private fun isAutomaticallyClassifiedUrlCategory(raw: String)");

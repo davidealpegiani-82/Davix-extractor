@@ -1301,39 +1301,47 @@ class MainActivity : FragmentActivity() {
             .replace('_', ' ').replace('-', ' ').replace('|', ' ')
             .replace(Regex("\\s+"), " ").trim()
         val name = channel.name.lowercase(Locale.ROOT)
-            .replace('_', ' ').replace('-', ' ')
+            .replace('_', ' ').replace('-', ' ').replace('.', ' ')
+            .replace(Regex("\\s+"), " ").trim()
         val url = channel.url.lowercase(Locale.ROOT)
         val path = runCatching { Uri.parse(channel.url).path.orEmpty().lowercase(Locale.ROOT) }.getOrDefault("")
         val source = "$group $name"
-        fun has(vararg terms: String) = terms.any { source.contains(it) }
-        fun token(vararg terms: String) = terms.any {
-            Regex("(^|[^a-z0-9])" + Regex.escape(it) + "([^a-z0-9]|$)").containsMatchIn(source)
+        fun hasIn(value: String, vararg terms: String) = terms.any { value.contains(it) }
+        fun has(vararg terms: String) = hasIn(source, *terms)
+        fun tokenIn(value: String, vararg terms: String) = terms.any {
+            Regex("(^|[^a-z0-9])" + Regex.escape(it) + "([^a-z0-9]|$)").containsMatchIn(value)
         }
+        fun token(vararg terms: String) = tokenIn(source, *terms)
 
-        // I percorsi /series/ e /movie/ sono segnali forti: prevalgono
-        // sull'estensione del file, perché anche alcuni VOD usano HLS (.m3u8).
-        val seriesPath = path.contains("/series/")
-        val moviePath = path.contains("/movie/") || path.contains("/movies/")
-        val seriesHint = seriesPath ||
-            (group.contains("serie") && !group.contains("serie a") && !group.contains("serie b")) ||
-            group.contains("series") || group.contains("tv show") ||
-            Regex("\\bS[0-9]{1,2}E[0-9]{1,2}\\b", RegexOption.IGNORE_CASE).containsMatchIn(name)
-        // "Cinema" da solo può indicare un canale lineare (es. Sky Cinema):
-        // per riconoscere un VOD usiamo "Film/Movie" o il percorso /movie/.
-        val movieHint = moviePath || group.contains("film") || group.contains("movie")
+        // Classificazione a evidenza graduata: gli indizi episodici/serie e i
+        // percorsi VOD prevalgono sempre sulle etichette generiche "live".
+        val episodePattern = Regex(
+            "\\b(?:s[0-9]{1,2}\\s*e[0-9]{1,3}|[0-9]{1,2}x[0-9]{1,3}|season\\s*[0-9]{1,2}\\s*episode\\s*[0-9]{1,3}|stagione\\s*[0-9]{1,2}\\s*episodio\\s*[0-9]{1,3})\\b",
+            RegexOption.IGNORE_CASE
+        )
+        val episodeEvidence = episodePattern.containsMatchIn(name) ||
+            episodePattern.containsMatchIn(url) ||
+            has("episodio", "episodi", "episode", "episodes", "stagione", "season", "serie tv", "tv series", "tv show", "series")
+        val seriesPath = path.contains("/series/") || path.contains("/serie/")
+        val moviePath = path.contains("/movie/") || path.contains("/movies/") || path.contains("/film/")
         val vodPath = path.contains("/vod/") || seriesPath || moviePath
         val vodExtension = Regex("\\.(mp4|mkv|avi|mov|m4v|wmv|webm)(?:$|[?&])").containsMatchIn(url)
-        val explicitVod = vodPath || token("vod") || has("video on demand", "on demand")
-        val explicitLive = path.contains("/live/") || group.contains("live") ||
-            (Regex("\\.(ts|m3u8)(?:$|[?&])").containsMatchIn(url) && !vodPath &&
-                !seriesHint && !movieHint && !token("vod") && !has("video on demand", "on demand"))
-        val isVod = !explicitLive && (explicitVod || seriesHint || movieHint || vodExtension)
+        val seriesEvidence = seriesPath || episodeEvidence ||
+            has("serie tv", "serie complete", "stagioni complete", "tv series", "tv show", "tv shows", "series")
+        val movieEvidence = moviePath || has("film", "films", "movie", "movies")
+        val strongVod = vodPath || seriesEvidence || movieEvidence ||
+            has("video on demand", "on demand") || token("vod") || vodExtension
+        val explicitLiveLabel = path.contains("/live/") || has("live", "canali tv", "tv channels", "linear", "broadcast")
+        val liveStreamExtension = Regex("\\.(ts|m3u8)(?:$|[?&])").containsMatchIn(url)
 
+        // Anche se il provider mette un VOD sotto una cartella chiamata live,
+        // la presenza di prove episodiche o di un percorso VOD deve prevalere.
+        val isVod = strongVod || (liveStreamExtension && (seriesEvidence || movieEvidence))
         if (isVod) {
-            val isSeries = seriesHint && !moviePath
+            val isSeries = seriesEvidence && !moviePath
             val genre = if (isSeries) {
                 when {
-                    has("crime", "poliziesco", "investig", "detective", "gangster") -> "Crime e Thriller"
+                    has("crime", "poliziesco", "investig", "detective", "gangster", "thriller") -> "Crime e Thriller"
                     has("commedia", "comedy", "sitcom", "comico") -> "Commedia"
                     has("horror", "terror") -> "Horror"
                     has("fantascienza", "sci fi", "sci-fi", "science fiction", "fantasy") -> "Fantascienza e Fantasy"
@@ -1359,8 +1367,8 @@ class MainActivity : FragmentActivity() {
             return if (isSeries) "VOD > SERIE > $genre" else "VOD > FILM > $genre"
         }
 
-        // Per i LIVE accorpiamo i sottogeneri sportivi meno popolati:
-        // il dettaglio del singolo evento resta nel nome del canale.
+        // Un'etichetta live è considerata valida solo in assenza di segnali VOD.
+        // L'estensione .m3u8/.ts da sola non basta: alcuni provider la usano per VOD.
         val liveCategory = when {
             has("xxx", "adult", "adulti", "erotic") -> "Adult"
             has("calcio", "football", "soccer", "serie a", "serie b", "champions league", "europa league", "conference league", "premier league", "bundesliga", "ligue 1", "coppa italia") -> "Sport > Calcio"
@@ -1377,7 +1385,6 @@ class MainActivity : FragmentActivity() {
         }
         return "LIVE > $liveCategory"
     }
-
     /**
      * Riconosce le sole cartelle generate automaticamente da DAVIX.
      * Le categorie personalizzate, anche se create sotto LIVE o VOD,
