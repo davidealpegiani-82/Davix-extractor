@@ -744,10 +744,6 @@ class MainActivity : FragmentActivity() {
                     }
                     val knownChannelKeys = existingChannelsByKey.keys.toHashSet()
                     val knownCategoryPaths = categories.toHashSet()
-                    val legacyAutoCategoryPrefixes = listOf(
-                        "Sport", "Cinema", "Serie TV", "Documentari", "Bambini",
-                        "News", "Musica", "Intrattenimento", "XXX"
-                    )
                     val savedCategoryMapping = runCatching {
                         JSONObject(categoryPrefs.getString("channel_categories_json", "{}") ?: "{}")
                     }.getOrDefault(JSONObject())
