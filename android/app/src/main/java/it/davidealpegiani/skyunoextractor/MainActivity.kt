@@ -777,9 +777,9 @@ class MainActivity : FragmentActivity() {
                                 val isLegacyProviderGroup = savedPath.isNotBlank() &&
                                     savedPath.equals(sourcePath, ignoreCase = true) &&
                                     !savedPath.contains(" > ")
-                                channel.category = if (savedCategory.isNotBlank() &&
-                                    !isAutomaticallyClassifiedUrlCategory(savedCategory) &&
-                                    !isLegacyProviderGroup) {
+                                val preserveManualCategory = savedCategory.isNotBlank() &&
+                                    !isAutomaticallyClassifiedUrlCategory(savedCategory)
+                                channel.category = if (preserveManualCategory && !isLegacyProviderGroup) {
                                     savedCategory
                                 } else {
                                     inferred
