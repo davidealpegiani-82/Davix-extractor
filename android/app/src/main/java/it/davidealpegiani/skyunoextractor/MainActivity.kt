@@ -766,22 +766,24 @@ class MainActivity : FragmentActivity() {
                             var inBatch = 0
                             while (processed < found.size && inBatch < batchSize) {
                                 val channel = found[processed]
-                                val savedCategory = savedCategoryMapping.optString(channel.url)
-                                if (savedCategory.isNotBlank()) channel.category = normalizeCategoryPath(savedCategory)
-                                val savedManualPath = normalizeCategoryPath(channel.category)
-                                val inferred = inferUrlCategoryPath(channel)
-                                channel.category = if (savedManualPath.startsWith("LIVE > ") || savedManualPath.startsWith("VOD > ")) {
-                                    if (savedManualPath in knownCategoryPaths) savedManualPath else inferred
-                                } else inferred
+                                // La categoria salvata può essere una scelta manuale oppure una vecchia
+                                // classificazione automatica. Classifichiamo sempre usando il group-title
+                                // originale della playlist, non la categoria memorizzata in precedenza.
+                                val sourceGroup = channel.category
+                                val savedCategory = normalizeCategoryPath(savedCategoryMapping.optString(channel.url))
+                                val inferred = inferUrlCategoryPath(channel.copy(category = sourceGroup))
+                                channel.category = if (savedCategory.isNotBlank() && !isAutomaticallyClassifiedUrlCategory(savedCategory)) {
+                                    savedCategory
+                                } else {
+                                    inferred
+                                }
                                 if (knownCategoryPaths.add(channel.category)) categories.add(channel.category)
                                 val key = channel.name.lowercase(Locale.ROOT) + "|" + channel.url
                                 if (!knownChannelKeys.add(key)) {
                                     duplicates++
                                     val existing = existingChannelsByKey[key]
                                     val oldPath = normalizeCategoryPath(existing?.category.orEmpty())
-                                    val wasAutomaticallyClassified = oldPath == "Da classificare" ||
-                                        oldPath == "Non classificati" ||
-                                        legacyAutoCategoryPrefixes.any { oldPath == it || oldPath.startsWith("$it > ") }
+                                    val wasAutomaticallyClassified = isAutomaticallyClassifiedUrlCategory(oldPath)
                                     if (existing != null && wasAutomaticallyClassified && existing.category != channel.category) {
                                         existing.category = channel.category
                                         reorganized++
@@ -798,6 +800,12 @@ class MainActivity : FragmentActivity() {
                                 updateImportProgress("Inserimento canali · $processed / ${found.size}", 85 + (processed * 14 / found.size.coerceAtLeast(1)))
                                 importHandler.postDelayed(this, 1L)
                             } else {
+                                // Rimuove soltanto le cartelle automatiche ormai vuote:
+                                // le categorie manuali e i relativi contenuti restano intatti.
+                                categories.removeAll { category ->
+                                    isAutomaticallyClassifiedUrlCategory(category) &&
+                                        channels.none { it.category == category }
+                                }
                                 renderChannels()
                                 saveCategorySettings()
                                 persistChannelLibrary()
@@ -1273,64 +1281,81 @@ class MainActivity : FragmentActivity() {
      * semantica compatta. Il group-title è un indizio, non viene copiato alla
      * cieca come cartella: spesso i provider generano decine di varianti.
      */
+    /**
+     * Categorie automatiche DAVIX per le playlist URL.
+     *
+     * Primo livello: LIVE oppure VOD.
+     * Secondo livello VOD: FILM oppure SERIE.
+     * Le categorie di genere sono volutamente accorpate: non creiamo cartelle
+     * per nazionalità, singoli sottogeneri o etichette commerciali del provider.
+     */
     private fun inferUrlCategoryPath(channel: TvChannel): String {
         val group = channel.category.lowercase(Locale.ROOT)
             .replace('_', ' ').replace('-', ' ').replace('|', ' ')
+            .replace(Regex("\\s+"), " ").trim()
         val name = channel.name.lowercase(Locale.ROOT)
             .replace('_', ' ').replace('-', ' ')
         val url = channel.url.lowercase(Locale.ROOT)
         val path = runCatching { Uri.parse(channel.url).path.orEmpty().lowercase(Locale.ROOT) }.getOrDefault("")
         val source = "$group $name"
         fun has(vararg terms: String) = terms.any { source.contains(it) }
-        fun token(vararg terms: String) = terms.any { Regex("(^|[^a-z0-9])" + Regex.escape(it) + "([^a-z0-9]|$)").containsMatchIn(source) }
+        fun token(vararg terms: String) = terms.any {
+            Regex("(^|[^a-z0-9])" + Regex.escape(it) + "([^a-z0-9]|$)").containsMatchIn(source)
+        }
 
-        // Per distinguere un canale lineare da un film non basta il nome:
-        // "Sky Cinema" può essere un canale LIVE. I segnali di tipo arrivano
-        // prima dal percorso URL e dal group-title, poi dai metadati episodio.
-        val seriesHint = path.contains("/series/") ||
-            group.contains("serie tv") || group.contains("series") || group.contains("tv show") ||
+        // I percorsi /series/ e /movie/ sono segnali forti: prevalgono
+        // sull'estensione del file, perché anche alcuni VOD usano HLS (.m3u8).
+        val seriesPath = path.contains("/series/")
+        val moviePath = path.contains("/movie/") || path.contains("/movies/")
+        val seriesHint = seriesPath ||
+            group.contains("serie") || group.contains("series") || group.contains("tv show") ||
             Regex("\\bS[0-9]{1,2}E[0-9]{1,2}\\b", RegexOption.IGNORE_CASE).containsMatchIn(name)
-        val movieHint = path.contains("/movie/") || path.contains("/movies/") ||
-            group.contains("film") || group.contains("movie") || group.contains("cinema")
+        val movieHint = moviePath ||
+            group.contains("film") || group.contains("movie") ||
+            (group.contains("cinema") && !group.contains("live"))
+        val vodPath = path.contains("/vod/") || seriesPath || moviePath
         val vodExtension = Regex("\\.(mp4|mkv|avi|mov|m4v|wmv|webm)(?:$|[?&])").containsMatchIn(url)
-        val liveHint = path.contains("/live/") ||
-            Regex("\\.(ts|m3u8)(?:$|[?&])").containsMatchIn(url) ||
-            group.contains("live") || has("canali live", "tv live", "iptv live")
-        val explicitVod = path.contains("/vod/") || token("vod") || has("video on demand", "on demand")
-        val isVod = !liveHint && (seriesHint || movieHint || vodExtension || explicitVod)
+        val explicitVod = vodPath || token("vod") || has("video on demand", "on demand")
+        val explicitLive = path.contains("/live/") || group.contains("live") ||
+            (Regex("\\.(ts|m3u8)(?:$|[?&])").containsMatchIn(url) && !vodPath)
+        val isVod = !explicitLive && (explicitVod || seriesHint || movieHint || vodExtension)
 
         if (isVod) {
-            val isSeries = seriesHint
-            val genre = when {
-                has("azione", "action", "adventure", "avventura", "martial arts") -> "Azione e Avventura"
-                has("commedia", "comedy", "comico") -> "Commedia"
-                has("drama", "drammatico", "dramatic", "fiction") -> "Drammatico"
-                has("crime", "poliziesco", "investig", "detective", "gangster") -> "Crime e Poliziesco"
-                has("thriller", "suspense", "mystery", "mistero") -> "Thriller e Mistero"
-                has("horror", "terror") -> "Horror"
-                has("fantascienza", "sci fi", "sci-fi", "science fiction", "fantasy", "fantasy") -> "Fantascienza e Fantasy"
-                has("romance", "romantico", "romantici", "romantic") -> "Romantici"
-                has("animation", "animazione", "anime", "cartoon", "cartoni") -> "Animazione e Anime"
-                has("documentary", "documentario", "documentari", "docu") -> "Documentari"
-                has("family", "famiglia", "kids", "bambini") -> "Famiglia e Bambini"
-                has("war", "guerra", "history", "storico", "storia") -> "Storici e Guerra"
-                has("western") -> "Western"
-                has("music", "musical", "musica", "concert") -> "Musicali"
-                has("reality", "show", "talent") -> "Reality e Show"
-                has("italian", "italiano", "italiani", "italia") -> "Produzioni Italiane"
-                has("english", "international", "internazionale") -> "Internazionali"
-                else -> if (isSeries) "Altre serie" else "Altri film"
+            val isSeries = seriesHint && !moviePath
+            val genre = if (isSeries) {
+                when {
+                    has("crime", "poliziesco", "investig", "detective", "gangster") -> "Crime e Thriller"
+                    has("commedia", "comedy", "sitcom", "comico") -> "Commedia"
+                    has("horror", "terror") -> "Horror"
+                    has("fantascienza", "sci fi", "sci-fi", "science fiction", "fantasy") -> "Fantascienza e Fantasy"
+                    has("azione", "action", "adventure", "avventura") -> "Azione e Avventura"
+                    has("animation", "animazione", "anime", "cartoon", "cartoni") -> "Anime e Animazione"
+                    has("documentary", "documentario", "documentari", "docu", "reality", "talent") -> "Documentari e Reality"
+                    has("drama", "drammatico", "dramatic", "fiction", "romance", "romantico") -> "Drammatiche"
+                    else -> "Altre serie"
+                }
+            } else {
+                when {
+                    has("crime", "poliziesco", "investig", "detective", "gangster", "thriller", "suspense", "mystery", "mistero") -> "Crime e Thriller"
+                    has("commedia", "comedy", "comico") -> "Commedia"
+                    has("horror", "terror") -> "Horror"
+                    has("fantascienza", "sci fi", "sci-fi", "science fiction", "fantasy") -> "Fantascienza e Fantasy"
+                    has("azione", "action", "adventure", "avventura", "martial arts") -> "Azione e Avventura"
+                    has("animation", "animazione", "anime", "cartoon", "cartoni", "family", "famiglia", "kids", "bambini") -> "Animazione e Famiglia"
+                    has("documentary", "documentario", "documentari", "docu", "music", "musical", "concert") -> "Documentari e Musical"
+                    has("drama", "drammatico", "dramatic", "fiction", "romance", "romantico", "war", "guerra", "history", "storico", "western") -> "Drammatici e Storici"
+                    else -> "Altri film"
+                }
             }
             return if (isSeries) "VOD > SERIE > $genre" else "VOD > FILM > $genre"
         }
 
+        // Per i LIVE accorpiamo i sottogeneri sportivi meno popolati:
+        // il dettaglio del singolo evento resta nel nome del canale.
         val liveCategory = when {
             has("xxx", "adult", "adulti", "erotic") -> "Adult"
             has("calcio", "football", "soccer", "serie a", "serie b", "champions league", "europa league", "conference league", "premier league", "bundesliga", "ligue 1", "coppa italia") -> "Sport > Calcio"
-            has("formula 1", "formula1", "motogp", "moto gp", "superbike", "wrc", "rally", "nascar", "motori") -> "Sport > Motori"
-            has("tennis", "atp", "wta", "roland garros", "wimbledon") -> "Sport > Tennis"
-            has("basket", "basketball", "nba", "euroleague") -> "Sport > Basket"
-            has("sport", "dazn", "eurosport", "sky sport", "sportitalia", "golf", "rugby", "volley", "pallavolo", "ciclismo", "olimpiadi") -> "Sport > Altri sport"
+            has("sport", "dazn", "eurosport", "sky sport", "sportitalia", "formula 1", "formula1", "motogp", "moto gp", "superbike", "wrc", "rally", "nascar", "motori", "tennis", "atp", "wta", "basket", "basketball", "nba", "euroleague", "golf", "rugby", "volley", "pallavolo", "ciclismo", "olimpiadi") -> "Sport > Altri sport"
             has("news", "notizie", "rai news", "sky tg", "tgcom", "bbc", "cnn", "al jazeera", "france 24", "euronews") -> "News"
             has("documentar", "discovery", "national geographic", "nat geo", "history channel", "wildlife", "natura", "focus") -> "Documentari"
             has("cartoon", "cartoni", "boing", "k2", "nickelodeon", "cartoonito", "disney junior", "kids", "bambini") -> "Bambini"
@@ -1342,6 +1367,36 @@ class MainActivity : FragmentActivity() {
             else -> "Altri canali"
         }
         return "LIVE > $liveCategory"
+    }
+
+    /**
+     * Riconosce le sole cartelle generate automaticamente da DAVIX.
+     * Le categorie personalizzate, anche se create sotto LIVE o VOD,
+     * non vengono sovrascritte durante una nuova importazione.
+     */
+    private fun isAutomaticallyClassifiedUrlCategory(raw: String): Boolean {
+        val path = normalizeCategoryPath(raw)
+        val generated = setOf(
+            "LIVE > Adult", "LIVE > Sport > Calcio", "LIVE > Sport > Altri sport",
+            "LIVE > News", "LIVE > Documentari", "LIVE > Bambini", "LIVE > Musica",
+            "LIVE > Regionali", "LIVE > Intrattenimento", "LIVE > Cinema",
+            "LIVE > Internazionali", "LIVE > Altri canali",
+            "VOD > FILM > Azione e Avventura", "VOD > FILM > Commedia",
+            "VOD > FILM > Crime e Thriller", "VOD > FILM > Horror",
+            "VOD > FILM > Fantascienza e Fantasy", "VOD > FILM > Animazione e Famiglia",
+            "VOD > FILM > Documentari e Musical", "VOD > FILM > Drammatici e Storici",
+            "VOD > FILM > Altri film",
+            "VOD > SERIE > Crime e Thriller", "VOD > SERIE > Commedia",
+            "VOD > SERIE > Horror", "VOD > SERIE > Fantascienza e Fantasy",
+            "VOD > SERIE > Azione e Avventura", "VOD > SERIE > Anime e Animazione",
+            "VOD > SERIE > Documentari e Reality", "VOD > SERIE > Drammatiche",
+            "VOD > SERIE > Altre serie"
+        )
+        val legacy = listOf(
+            "Sport", "Cinema", "Serie TV", "Documentari", "Bambini",
+            "News", "Musica", "Intrattenimento", "XXX", "Da classificare", "Non classificati"
+        )
+        return path in generated || legacy.any { path == it || path.startsWith("$it > ") }
     }
 
     private fun inferCategoryPath(channel: TvChannel): String {
