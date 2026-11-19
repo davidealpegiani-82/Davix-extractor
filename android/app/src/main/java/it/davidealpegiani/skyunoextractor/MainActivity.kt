@@ -695,7 +695,7 @@ class MainActivity : FragmentActivity() {
         importInProgress = true
         status.text = "Download playlist IPTV in corso…"
         updateImportProgress("Connessione alla sorgente IPTV…", null)
-        Thread {
+        Thread({
             try {
                 val connection = (URL(address).openConnection() as HttpURLConnection).apply {
                     requestMethod = "GET"
@@ -730,48 +730,44 @@ class MainActivity : FragmentActivity() {
                 }
                 updateImportProgress("Download completato · analisi dei canali…", 32)
                 val text = String(bytes, StandardCharsets.UTF_8).removePrefix("\uFEFF")
-                val found = parseChannels(text) { parsed -> updateImportProgress("Analisi playlist · $parsed%", 32 + (parsed * 0.48).toInt()) }
+                val found = parseChannels(text) { parsed ->
+                    updateImportProgress("Analisi playlist · $parsed%", 32 + (parsed * 0.48).toInt())
+                }
                 if (found.isEmpty()) throw IllegalStateException("Il collegamento non ha restituito una playlist M3U valida.")
                 updateImportProgress("Analisi completata · classificazione e controllo duplicati…", 85)
                 savePlaylistCopy("playlist-remota.m3u", bytes)
+
+                // La classificazione URL e il controllo duplicati sono CPU-bound:
+                // eseguirli sul thread UI causava ANR con playlist molto grandi.
                 runOnUiThread {
                     if (isFinishing || isDestroyed) {
                         importInProgress = false
                         return@runOnUiThread
                     }
-                    val existingChannelsByKey = channels.associateBy {
-                        it.name.lowercase(Locale.ROOT) + "|" + it.url
+                    val existingCategoriesByKey = channels.associate {
+                        (it.name.lowercase(Locale.ROOT) + "|" + it.url) to it.category
                     }
-                    val knownChannelKeys = existingChannelsByKey.keys.toHashSet()
-                    val knownCategoryPaths = categories.toHashSet()
-                    val savedCategoryMapping = runCatching {
-                        JSONObject(categoryPrefs.getString("channel_categories_json", "{}") ?: "{}")
-                    }.getOrDefault(JSONObject())
-                    var added = 0
-                    var duplicates = 0
-                    var reorganized = 0
-                    var processed = 0
-                    val batchSize = 200
-                    val importHandler = android.os.Handler(android.os.Looper.getMainLooper())
-                    val importBatch = object : Runnable {
-                        override fun run() {
-                            if (isFinishing || isDestroyed) {
-                                importInProgress = false
-                                return
-                            }
-                            var inBatch = 0
-                            while (processed < found.size && inBatch < batchSize) {
-                                val channel = found[processed]
-                                // La categoria salvata può essere una scelta manuale oppure una vecchia
-                                // classificazione automatica. Classifichiamo sempre usando il group-title
-                                // originale della playlist, non la categoria memorizzata in precedenza.
+                    val knownKeysSnapshot = existingCategoriesByKey.keys.toHashSet()
+                    val savedMappingJson = categoryPrefs.getString("channel_categories_json", "{}") ?: "{}"
+                    val knownCategoriesSnapshot = categories.toHashSet()
+
+                    Thread({
+                        try {
+                            data class PreparedChannel(
+                                val channel: TvChannel,
+                                val key: String,
+                                val category: String,
+                                val duplicate: Boolean
+                            )
+                            val savedCategoryMapping = runCatching { JSONObject(savedMappingJson) }.getOrDefault(JSONObject())
+                            val knownChannelKeys = knownKeysSnapshot.toMutableSet()
+                            val prepared = ArrayList<PreparedChannel>(found.size)
+                            val knownCategoryPaths = knownCategoriesSnapshot.toMutableSet()
+
+                            found.forEachIndexed { index, channel ->
                                 val sourceGroup = channel.category
                                 val savedCategory = normalizeCategoryPath(savedCategoryMapping.optString(channel.url))
                                 val inferred = inferUrlCategoryPath(channel.copy(category = sourceGroup))
-                                // Le vecchie importazioni URL salvavano il group-title del provider
-                                // come categoria semplice. Se il valore salvato coincide ancora con il
-                                // group-title originale, non è una personalizzazione: va migrato nella
-                                // gerarchia LIVE/VOD. Una categoria manuale diversa dal group-title resta intatta.
                                 val savedPath = normalizeCategoryPath(savedCategory)
                                 val sourcePath = normalizeCategoryPath(sourceGroup)
                                 val isLegacyProviderGroup = savedPath.isNotBlank() &&
@@ -779,63 +775,111 @@ class MainActivity : FragmentActivity() {
                                     !savedPath.contains(" > ")
                                 val preserveManualCategory = savedCategory.isNotBlank() &&
                                     !isAutomaticallyClassifiedUrlCategory(savedCategory)
-                                channel.category = if (preserveManualCategory && !isLegacyProviderGroup) {
-                                    savedCategory
-                                } else {
-                                    inferred
-                                }
-                                if (knownCategoryPaths.add(channel.category)) categories.add(channel.category)
+                                val resolvedCategory = if (preserveManualCategory && !isLegacyProviderGroup) savedCategory else inferred
+                                channel.category = resolvedCategory
+                                knownCategoryPaths.add(resolvedCategory)
                                 val key = channel.name.lowercase(Locale.ROOT) + "|" + channel.url
-                                if (!knownChannelKeys.add(key)) {
-                                    duplicates++
-                                    val existing = existingChannelsByKey[key]
-                                    val oldPath = normalizeCategoryPath(existing?.category.orEmpty())
-                                    val wasAutomaticallyClassified = isAutomaticallyClassifiedUrlCategory(oldPath)
-                                    if (existing != null && wasAutomaticallyClassified && existing.category != channel.category) {
-                                        existing.category = channel.category
-                                        reorganized++
-                                    }
-                                } else {
-                                    channel.selected = false
-                                    channels.add(channel)
-                                    added++
+                                val duplicate = !knownChannelKeys.add(key)
+                                prepared.add(PreparedChannel(channel, key, resolvedCategory, duplicate))
+                                if (index % 500 == 0) {
+                                    updateImportProgress("Classificazione playlist · $index / ${found.size}", 85 + (index * 10 / found.size.coerceAtLeast(1)))
                                 }
-                                processed++
-                                inBatch++
                             }
-                            if (processed < found.size) {
-                                updateImportProgress("Inserimento canali · $processed / ${found.size}", 85 + (processed * 14 / found.size.coerceAtLeast(1)))
-                                importHandler.postDelayed(this, 1L)
-                            } else {
-                                // Rimuove soltanto le cartelle automatiche ormai vuote:
-                                // le categorie manuali e i relativi contenuti restano intatti.
-                                categories.removeAll { category ->
-                                    isAutomaticallyClassifiedUrlCategory(category) &&
-                                        channels.none { it.category == category }
+
+                            runOnUiThread {
+                                if (isFinishing || isDestroyed) {
+                                    importInProgress = false
+                                    return@runOnUiThread
                                 }
-                                renderChannels()
-                                saveCategorySettings()
-                                persistChannelLibrary()
-                                renderSavedPlaylists()
+                                val existingChannelsByKey = channels.associateBy {
+                                    it.name.lowercase(Locale.ROOT) + "|" + it.url
+                                }
+                                var added = 0
+                                var duplicates = 0
+                                var reorganized = 0
+                                var processed = 0
+                                val batchSize = 120
+                                val importHandler = Handler(Looper.getMainLooper())
+                                val importBatch = object : Runnable {
+                                    override fun run() {
+                                        if (isFinishing || isDestroyed) {
+                                            importInProgress = false
+                                            return
+                                        }
+                                        val batchStartedAt = android.os.SystemClock.uptimeMillis()
+                                        var inBatch = 0
+                                        while (processed < prepared.size && inBatch < batchSize &&
+                                            android.os.SystemClock.uptimeMillis() - batchStartedAt < 12L
+                                        ) {
+                                            val item = prepared[processed]
+                                            if (item.duplicate) {
+                                                duplicates++
+                                                val existing = existingChannelsByKey[item.key]
+                                                val oldPath = normalizeCategoryPath(existing?.category.orEmpty())
+                                                if (existing != null &&
+                                                    isAutomaticallyClassifiedUrlCategory(oldPath) &&
+                                                    existing.category != item.category
+                                                ) {
+                                                    existing.category = item.category
+                                                    reorganized++
+                                                }
+                                            } else {
+                                                item.channel.selected = false
+                                                channels.add(item.channel)
+                                                existingChannelsByKey[item.key] = item.channel
+                                                added++
+                                            }
+                                            processed++
+                                            inBatch++
+                                        }
+
+                                        if (processed < prepared.size) {
+                                            updateImportProgress(
+                                                "Inserimento canali · $processed / ${prepared.size}",
+                                                95 + (processed * 4 / prepared.size.coerceAtLeast(1))
+                                            )
+                                            importHandler.postDelayed(this, 8L)
+                                        } else {
+                                            // Rimuove solo le cartelle automatiche ormai vuote.
+                                            categories.removeAll { category ->
+                                                isAutomaticallyClassifiedUrlCategory(category) &&
+                                                    channels.none { it.category == category }
+                                            }
+                                            renderChannels()
+                                            saveCategorySettings()
+                                            persistChannelLibrary()
+                                            renderSavedPlaylists()
+                                            importInProgress = false
+                                            finishImportProgress()
+                                            status.text = "Playlist URL analizzata · ${found.size} canali letti · $added nuovi · $reorganized riclassificati · $duplicates già presenti."
+                                        }
+                                    }
+                                }
+                                importHandler.post(importBatch)
+                            }
+                        } catch (error: Exception) {
+                            runOnUiThread {
                                 importInProgress = false
                                 finishImportProgress()
-                                status.text = "Playlist URL analizzata · ${found.size} canali letti · $added nuovi · $reorganized riclassificati · $duplicates già presenti."
+                                if (!isFinishing && !isDestroyed) {
+                                    status.text = "Analisi playlist non riuscita: " + (error.message ?: "errore inatteso")
+                                    toast(status.text.toString())
+                                }
                             }
                         }
-                    }
-                    importHandler.post(importBatch)
+                    }, "DAVIX-Playlist-Analysis").apply { isDaemon = true }.start()
                 }
-            } catch (e: Exception) {
+            } catch (error: Exception) {
                 runOnUiThread {
                     importInProgress = false
                     finishImportProgress()
                     if (!isFinishing && !isDestroyed) {
-                        status.text = "Download M3U non riuscito: " + (e.message ?: "errore di rete")
+                        status.text = "Download M3U non riuscito: " + (error.message ?: "errore di rete")
                         toast(status.text.toString())
                     }
                 }
             }
-        }.start()
+        }, "DAVIX-Playlist-Download").apply { isDaemon = true }.start()
     }
 
     private fun showCloudSyncSettings() {
