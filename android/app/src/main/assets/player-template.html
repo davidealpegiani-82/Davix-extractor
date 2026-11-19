@@ -271,20 +271,84 @@ function matchEpgChannel(channel,dataset){const ids=Array.from(dataset.names.key
 async function readXmltvResponse(response){const bytes=new Uint8Array(await response.arrayBuffer());if(bytes[0]===31&&bytes[1]===139){if(!window.DecompressionStream)throw new Error('Questo browser non supporta la decompressione GZIP');const stream=new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));return await new Response(stream).text()}return new TextDecoder('utf-8').decode(bytes)}
 async function refreshEpg(){if(epgRefreshRunning||!CHANNELS.length)return;epgRefreshRunning=true;epgStatus.textContent='EPG: recupero palinsesti e associazione automatica…';const sources=[['sky','Sky Italia'],['iptv','IPTV-EPG Italia'],['epgshare','EPG Share Italia'],['open3','Open EPG Italia 3'],['open8','Open EPG Italia 8']];try{const state=cloudState(),secret=await getDeviceSecret(state);if(!secret)throw new Error('Credenziali Cloud Sync non disponibili');const datasets=[];let cursor=0;const worker=async()=>{while(cursor<sources.length){const index=cursor++,[sourceKey,label]=sources[index];try{const response=await fetch(CLOUD_SYNC_URL+'/v1/epg?source='+encodeURIComponent(sourceKey),{headers:{Authorization:'Bearer '+secret},cache:'no-store'});if(!response.ok)throw new Error('HTTP '+response.status);datasets.push([label,parseXmltv(await readXmltvResponse(response))])}catch(e){}}};await Promise.all([worker(),worker(),worker()]);const now=Date.now(),result={};let matched=0;const used=new Set();CHANNELS.forEach(channel=>{const found=[];datasets.forEach(([label,data])=>{const id=matchEpgChannel(channel,data);if(!id)return;const items=(data.programmes.get(id)||[]).filter(p=>p.stop>now);found.push({label,items});used.add(label)});if(!found.length)return;const merged=found.flatMap(x=>x.items).sort((a,b)=>a.start-b.start||a.stop-b.stop).filter((p,i,all)=>all.findIndex(x=>x.start===p.start&&x.stop===p.stop)===i);const current=merged.find(p=>p.start<=now&&p.stop>now),next=merged.find(p=>p.start>now);result[channel.url]={nowTitle:current?.title||'',nextTitle:next?.title||'',nowStartMs:current?.start||0,nowStopMs:current?.stop||0};matched++});epgGuides=result;try{localStorage.setItem(EPG_CACHE_KEY,JSON.stringify(result))}catch(e){}renderChannels(false);const nowCount=Object.values(result).filter(x=>x.nowTitle).length;epgStatus.textContent='EPG aggiornato · '+matched+'/'+CHANNELS.length+' canali associati · '+nowCount+' programmi in onda · '+Array.from(used).join(' + ')}catch(e){epgStatus.textContent='EPG non aggiornato: '+(e.message||'fonti non raggiungibili')+'. La guida salvata resta disponibile.'}finally{epgRefreshRunning=false}}
 function updateListTitle(){const key=expandedCategoryKey;listTitle.textContent=!key?'I TUOI CANALI':key==='special:favorites'?'★ PREFERITI':key==='special:uncategorized'?'DA CLASSIFICARE':key.replace('category:','').toUpperCase()}
+const SOURCE_SELECTION_KEY='davix_selected_source_by_group_v1';
+let selectedSourceByGroup={};
+try{selectedSourceByGroup=JSON.parse(localStorage.getItem(SOURCE_SELECTION_KEY)||'{}')||{}}catch(e){selectedSourceByGroup={}}
+function channelGroupKey(c){
+ const category=String(c.category||'Non classificati').trim().toLocaleLowerCase('it');
+ const tvgId=String(c.tvgId||'').trim().toLocaleLowerCase('it');
+ const identity=tvgId?'id:'+tvgId:'name:'+String(c.name||'').toLocaleLowerCase('it').replace(/\b(4k|uhd|fhd|full\s*hd|hd|sd|1080p|720p|2160p)\b/gi,' ').replace(/[^\p{L}\p{N}]+/gu,' ').trim().replace(/\s+/g,' ');
+ return category+'|'+identity;
+}
+function sourceQuality(c){
+ const value=(String(c.name||'')+' '+String(c.url||'')).toLowerCase();
+ if(/\b(4k|uhd|2160p)\b/.test(value))return 4;
+ if(/\b(fhd|full\s*hd|1080p)\b/.test(value))return 3;
+ if(/\bhd\b|720p/.test(value))return 2;
+ if(/\bsd\b|576p|480p/.test(value))return 1;
+ return 0;
+}
+function groupChannelEntries(entries){
+ const groups=new Map();
+ entries.forEach(entry=>{const key=channelGroupKey(entry.channel);if(!groups.has(key))groups.set(key,[]);groups.get(key).push(entry)});
+ return Array.from(groups,([key,sources])=>({key,name:sources[0].channel.name,sources}));
+}
+function preferredGroupSource(group){
+ const saved=selectedSourceByGroup[group.key];
+ const manual=group.sources.find(x=>x.channel.url===saved);
+ if(manual)return manual;
+ return group.sources.map((x,index)=>({...x,index})).sort((a,b)=>sourceQuality(b.channel)-sourceQuality(a.channel)||(b.channel.tvgId?1:0)-(a.channel.tvgId?1:0)||(b.channel.logo?1:0)-(a.channel.logo?1:0)||a.index-b.index)[0];
+}
+function sourceDescription(entry,index){
+ const c=entry.channel,value=(String(c.name||'')+' '+String(c.url||'')).toLowerCase();
+ const quality=/\b(4k|uhd|2160p)\b/.test(value)?'4K / UHD':/\b(fhd|full\s*hd|1080p)\b/.test(value)?'Full HD':/\bhd\b|720p/.test(value)?'HD':/\bsd\b|576p|480p/.test(value)?'SD':'Sorgente '+(index+1);
+ let host='';try{host=new URL(c.url).host}catch(e){}
+ return quality+(host?' · '+host:'');
+}
+function persistSourceChoice(group,entry){
+ selectedSourceByGroup[group.key]=entry.channel.url;
+ try{localStorage.setItem(SOURCE_SELECTION_KEY,JSON.stringify(selectedSourceByGroup))}catch(e){}
+}
+function showSourcePicker(group,target){
+ const current=preferredGroupSource(group);
+ const dialog=document.createElement('dialog');
+ dialog.className='source-picker';
+ dialog.style.cssText='width:min(92vw,520px);max-height:80vh;overflow:auto;border:1px solid #28718d;border-radius:16px;background:#0b1728;color:#eef6ff;padding:18px;box-shadow:0 20px 70px #000b';
+ const heading=document.createElement('h2');heading.textContent=group.name+' · '+group.sources.length+' sorgenti';heading.style.cssText='font-size:1.15rem;margin:0 0 14px';dialog.appendChild(heading);
+ group.sources.forEach((entry,index)=>{
+  const option=document.createElement('button');option.type='button';option.textContent=(entry.channel.url===current.channel.url?'✓  ':'')+sourceDescription(entry,index);option.style.cssText='display:block;width:100%;text-align:left;margin:8px 0;padding:14px;border:1px solid #31536d;border-radius:10px;background:'+(entry.channel.url===current.channel.url?'#123e55':'#142338')+';color:#fff;font-size:1rem';
+  option.addEventListener('click',()=>{persistSourceChoice(group,entry);dialog.close();dialog.remove();startChannel(entry.index);if(target===fsDrawerList)fsDrawer.hidden=true;});
+  dialog.appendChild(option);
+ });
+ const close=document.createElement('button');close.type='button';close.textContent='Annulla';close.style.cssText='margin-top:8px;padding:11px 16px;border-radius:9px;background:#26384d;color:#fff;border:0';close.addEventListener('click',()=>{dialog.close();dialog.remove()});dialog.appendChild(close);
+ document.body.appendChild(dialog);if(typeof dialog.showModal==='function')dialog.showModal();else{const choice=window.prompt(group.sources.map((x,i)=>(i+1)+'. '+sourceDescription(x,i)).join('\n'),'1');const selected=Number(choice)-1;if(Number.isInteger(selected)&&group.sources[selected]){persistSourceChoice(group,group.sources[selected]);startChannel(group.sources[selected].index)}dialog.remove()}
+}
 function renderChannels(autoStart=false,target=list){
  target.innerHTML='';if(target===list)updateListTitle();
  if(!CHANNELS.length){target.innerHTML='<div class="status">Attiva questo dispositivo con un codice monouso per visualizzare i canali.</div>';if(target===list)setStatus('Attiva questo dispositivo con un codice monouso per visualizzare i canali.');return}
- const appendChannel=(c,i)=>{const row=document.createElement('div');row.className='row';const b=document.createElement('button');b.type='button';b.className='channel'+(active===i?' active':'');b.setAttribute('aria-label','Riproduci '+c.name);const labels=document.createElement('span');labels.className='name';const name=document.createElement('span');name.textContent=c.name;labels.appendChild(name);const guide=epgGuides[c.url];if(guide&&(guide.nowTitle||guide.nextTitle)){const epg=document.createElement('span');epg.className='epg';epg.textContent=(guide.nowTitle?'ORA'+(guide.nowStartMs?'  '+new Date(guide.nowStartMs).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'})+'–'+new Date(guide.nowStopMs).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'}):'')+'  ·  '+guide.nowTitle:'')+(guide.nextTitle?((guide.nowTitle?'\n':'')+'DOPO  ·  '+guide.nextTitle):'');labels.appendChild(epg)}b.appendChild(labels);b.addEventListener('click',()=>{if(!hasValidLease()){setStatus('Attivazione richiesta.');return}retryCount=0;startChannel(i);if(target===fsDrawerList)fsDrawer.hidden=true});row.appendChild(b);const fav=document.createElement('button');fav.type='button';fav.className='favorite'+(favoriteUrls.has(c.url)?' on':'');fav.textContent=favoriteUrls.has(c.url)?'★':'☆';fav.setAttribute('aria-label',favoriteUrls.has(c.url)?'Rimuovi dai preferiti':'Aggiungi ai preferiti');fav.addEventListener('click',()=>{if(favoriteUrls.has(c.url))favoriteUrls.delete(c.url);else favoriteUrls.add(c.url);try{localStorage.setItem(FAVORITES_KEY,JSON.stringify(Array.from(favoriteUrls)))}catch(e){}renderChannels(false);if(document.fullscreenElement)renderChannels(false,fsDrawerList)});row.appendChild(fav);if(android){const app=document.createElement('button');app.type='button';app.className='native';app.textContent='APP';app.setAttribute('aria-label','Apri '+c.name+' in DAVIX Player');app.addEventListener('click',()=>{if(!hasValidLease())return;active=i;openLite()});row.appendChild(app)}target.appendChild(row)};
  const visibleChannels=CHANNELS.map((channel,index)=>({channel,index})).filter(x=>!channelSearchTerm||(String(x.channel.name||'')+' '+String(x.channel.category||'')).toLocaleLowerCase('it').includes(channelSearchTerm));
+ const groups=groupChannelEntries(visibleChannels);
+ const appendChannel=group=>{
+  const chosen=preferredGroupSource(group),c=chosen.channel,i=chosen.index;
+  const row=document.createElement('div');row.className='row';
+  const b=document.createElement('button');b.type='button';b.className='channel'+(active===i?' active':'');b.setAttribute('aria-label',(group.sources.length>1?'Scegli sorgente per ':'Riproduci ')+c.name);
+  const labels=document.createElement('span');labels.className='name';const name=document.createElement('span');name.textContent=c.name;labels.appendChild(name);
+  if(group.sources.length>1){const hint=document.createElement('span');hint.className='epg';hint.textContent=group.sources.length+' SORGENTI DISPONIBILI · APRI PER SCEGLIERE';labels.appendChild(hint)}
+  const guide=group.sources.map(x=>epgGuides[x.channel.url]).find(Boolean);
+  if(guide&&(guide.nowTitle||guide.nextTitle)){const epg=document.createElement('span');epg.className='epg';epg.textContent=(guide.nowTitle?'ORA'+(guide.nowStartMs?'  '+new Date(guide.nowStartMs).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'})+'–'+new Date(guide.nowStopMs).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'}):'')+'  ·  '+guide.nowTitle:'')+(guide.nextTitle?((guide.nowTitle?'\n':'')+'DOPO  ·  '+guide.nextTitle):'');labels.appendChild(epg)}
+  b.appendChild(labels);b.addEventListener('click',()=>{if(!hasValidLease()){setStatus('Attivazione richiesta.');return}if(group.sources.length>1){showSourcePicker(group,target);return}retryCount=0;startChannel(i);if(target===fsDrawerList)fsDrawer.hidden=true});row.appendChild(b);
+  const groupFavorite=group.sources.some(x=>favoriteUrls.has(x.channel.url));const fav=document.createElement('button');fav.type='button';fav.className='favorite'+(groupFavorite?' on':'');fav.textContent=groupFavorite?'★':'☆';fav.setAttribute('aria-label',groupFavorite?'Rimuovi dai preferiti':'Aggiungi ai preferiti');fav.addEventListener('click',()=>{group.sources.forEach(x=>{if(groupFavorite)favoriteUrls.delete(x.channel.url);else favoriteUrls.add(x.channel.url)});try{localStorage.setItem(FAVORITES_KEY,JSON.stringify(Array.from(favoriteUrls)))}catch(e){}renderChannels(false);if(document.fullscreenElement)renderChannels(false,fsDrawerList)});row.appendChild(fav);
+  if(android){const app=document.createElement('button');app.type='button';app.className='native';app.textContent='APP';app.setAttribute('aria-label','Apri '+c.name+' in DAVIX Player');app.addEventListener('click',()=>{if(!hasValidLease())return;active=i;openLite()});row.appendChild(app)}
+  target.appendChild(row)
+ };
  const paths=Array.from(new Set([...CATEGORIES,...visibleChannels.map(x=>x.channel.category||'Non classificati')].map(x=>String(x||'').split('>').map(y=>y.trim()).filter(Boolean).join(' > ')).filter(x=>x&&!/^non classificati$/i.test(x)))).filter(path=>visibleChannels.some(x=>String(x.channel.category||'').trim().toLowerCase()===path.toLowerCase())).sort((a,b)=>a.localeCompare(b,'it'));
- const roots=[...new Set(paths.map(path=>path.split('>').map(part=>part.trim()).filter(Boolean)[0]).filter(Boolean))];
  const rendered=new Set();
- const addFolder=(title,key,items)=>{const expanded=expandedCategoryKey===key;const folder=document.createElement('button');folder.type='button';folder.className='category-title';folder.dataset.categoryKey=key;folder.textContent=(expanded?'▾  ':'▸  ')+title.toUpperCase()+'    ·  '+items.length;folder.setAttribute('aria-expanded',String(expanded));folder.addEventListener('click',()=>{expandedCategoryKey=expanded?'':key;renderChannels(false,target);const next=[...target.querySelectorAll('.category-title')].find(button=>button.dataset.categoryKey===key);if(next)next.focus()});target.appendChild(folder);if(expanded)items.forEach(x=>appendChannel(x.channel,x.index))};
- const favorites=visibleChannels.filter(x=>favoriteUrls.has(x.channel.url));if(favorites.length){addFolder('★ Preferiti','special:favorites',favorites);favorites.forEach(x=>rendered.add(x.channel.url))}
- paths.forEach(path=>{const items=visibleChannels.filter(x=>String(x.channel.category||'Non classificati').trim().toLowerCase()===path.toLowerCase()&&!rendered.has(x.channel.url));if(items.length){addFolder(path,'category:'+path,items);items.forEach(x=>rendered.add(x.channel.url))}});
- const uncategorized=visibleChannels.filter(x=>!rendered.has(x.channel.url));if(uncategorized.length)addFolder('Da classificare','special:uncategorized',uncategorized);
+ const addFolder=(title,key,items)=>{const expanded=expandedCategoryKey===key;const folder=document.createElement('button');folder.type='button';folder.className='category-title';folder.dataset.categoryKey=key;folder.textContent=(expanded?'▾  ':'▸  ')+title.toUpperCase()+'    ·  '+items.length;folder.setAttribute('aria-expanded',String(expanded));folder.addEventListener('click',()=>{expandedCategoryKey=expanded?'':key;renderChannels(false,target);const next=[...target.querySelectorAll('.category-title')].find(button=>button.dataset.categoryKey===key);if(next)next.focus()});target.appendChild(folder);if(expanded)items.forEach(appendChannel)};
+ const favorites=groups.filter(g=>g.sources.some(x=>favoriteUrls.has(x.channel.url)));if(favorites.length){addFolder('★ Preferiti','special:favorites',favorites);favorites.forEach(g=>g.sources.forEach(x=>rendered.add(x.channel.url)))}
+ paths.forEach(path=>{const items=groups.filter(g=>String(g.sources[0].channel.category||'Non classificati').trim().toLowerCase()===path.toLowerCase()&&!g.sources.every(x=>rendered.has(x.channel.url)));if(items.length){addFolder(path,'category:'+path,items);items.forEach(g=>g.sources.forEach(x=>rendered.add(x.channel.url)))}})
+ const uncategorized=groups.filter(g=>!g.sources.every(x=>rendered.has(x.channel.url)));if(uncategorized.length)addFolder('Da classificare','special:uncategorized',uncategorized);
  if(!visibleChannels.length){const empty=document.createElement('div');empty.className='status';empty.textContent='Nessun canale trovato.';target.appendChild(empty)}
- if(autoStart)startChannel(0)
+ if(autoStart&&groups.length)startChannel(preferredGroupSource(groups[0]).index)
 }
 function isTvMode(){return /Android TV|AFT|Fire TV|SMART-TV|Tizen|Web0S/i.test(navigator.userAgent)||window.matchMedia('(pointer: coarse)').matches}
 function hasValidLease(){const state=cloudState();return !!(state.deviceSecret||state.secretCipher)&&Number(state.leaseExpiresAt||0)>Date.now()}
