@@ -1268,8 +1268,8 @@ class MainActivity : Activity() {
         renderCloudChannels()
         playerContainer.visibility = View.VISIBLE
         player?.apply {
-            // setMediaItem sostituisce direttamente la sorgente attiva: evitare stop()+clearMediaItems()
-            // riduce il lavoro sul cambio canale e lascia a Media3 la gestione della transizione.
+            stop()
+            clearMediaItems()
             setMediaItem(createLiveMediaItem(parsed))
             prepare()
             playWhenReady = true
@@ -1493,9 +1493,9 @@ class MainActivity : Activity() {
         }
         return builder.setLiveConfiguration(
                 MediaItem.LiveConfiguration.Builder()
-                    .setTargetOffsetMs(5_000)
-                    .setMinOffsetMs(3_000)
-                    .setMaxOffsetMs(10_000)
+                    .setTargetOffsetMs(60_000)
+                    .setMinOffsetMs(45_000)
+                    .setMaxOffsetMs(120_000)
                     .setMinPlaybackSpeed(0.97f)
                     .setMaxPlaybackSpeed(1.04f)
                     .build()
@@ -1668,10 +1668,10 @@ class MainActivity : Activity() {
     private fun initializePlayer() {
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                5_000,
                 30_000,
-                1_000,
-                2_000
+                90_000,
+                8_000,
+                15_000
             )
             // Limita la memoria occupata dai segmenti: la durata del buffer non deve
             // crescere senza controllo su TV con memoria ridotta.
@@ -1697,7 +1697,7 @@ class MainActivity : Activity() {
         val liveSpeedControl = DefaultLivePlaybackSpeedControl.Builder()
             .setFallbackMinPlaybackSpeed(0.97f)
             .setFallbackMaxPlaybackSpeed(1.03f)
-            .setTargetLiveOffsetIncrementOnRebufferMs(3_000)
+            .setTargetLiveOffsetIncrementOnRebufferMs(15_000)
             .build()
 
         // Come nell'Extractor, lascia che Media3 riconosca il contenuto: forzare
