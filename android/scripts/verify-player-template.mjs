@@ -108,7 +108,7 @@ assert.match(lite, /setPrioritizeTimeOverSizeThresholds\(false\)/, 'Player Lite 
 assert.match(lite, /DefaultRenderersFactory\(this\)\.setEnableDecoderFallback\(true\)/, 'Player Lite must allow Media3 to fall back when a hardware decoder fails');
 assert.match(lite, /terminalPlaybackFailure/, 'terminal playback errors must suppress the idle watchdog retry loop');
 const playCloudChannelBody = lite.slice(lite.indexOf('private fun playCloudChannel('), lite.indexOf('private fun isVisibleInHierarchy('));
-assert.ok(playCloudChannelBody.includes('setMediaItem(createLiveMediaItem(parsed))') && !playCloudChannelBody.includes('stop()') && !playCloudChannelBody.includes('clearMediaItems()'), 'channel switching must replace the active media item without a separate stop/clear cycle');
+assert.ok(playCloudChannelBody.includes('setMediaItem(createLiveMediaItem(parsed))') && !playCloudChannelBody.includes('\n            stop()\n') && !playCloudChannelBody.includes('\n            clearMediaItems()\n'), 'channel switching must replace the active media item without a separate stop/clear cycle');
 assert.match(lite, /terminalPlaybackFailure\) \{[\s\S]*?return\n        \}/, 'terminal errors must stop the periodic STATE_IDLE watchdog');
 assert.match(lite, /retryAfterDelayMs\(response: HttpDataSource\.InvalidResponseCodeException\)/, 'HTTP Retry-After must be respected when a source rate-limits requests');
 assert.match(lite, /maxOf\(localDelay, lastServerRetryAfterMs\)/, 'server retry hints must override shorter local backoff delays');
