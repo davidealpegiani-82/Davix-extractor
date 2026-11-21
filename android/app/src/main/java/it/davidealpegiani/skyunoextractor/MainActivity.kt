@@ -2104,8 +2104,9 @@ class MainActivity : FragmentActivity() {
                     setPadding(dp(9), 0, 0, 0)
                 }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
                 header.addView(TextView(this).apply {
-                    text = "$total  ·  ${if (expanded) "⌃" else "⌄"}"
-                    textSize = 12f
+                    text = "${if (expanded) "⌃  TOCCA PER CHIUDERE" else "⌄  TOCCA PER APRIRE"}  ·  $total"
+                    textSize = 10f
+                    setTypeface(null, android.graphics.Typeface.BOLD)
                     setTextColor(CYAN)
                 })
                 run {
