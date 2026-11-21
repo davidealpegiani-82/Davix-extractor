@@ -119,6 +119,8 @@ class MainActivity : FragmentActivity() {
     private var currentPlayingChannelUrl: String? = null
     private var playingChannelButton: Button? = null
     private var importInProgress = false
+    // Evita che onStop salvi una lista vuota mentre il ripristino asincrono è ancora in corso.
+    private var channelLibraryRestorePending = false
     private lateinit var count: TextView
     private lateinit var playerView: PlayerView
     private lateinit var localPlayer: ExoPlayer
@@ -557,7 +559,7 @@ class MainActivity : FragmentActivity() {
         root.addView(importProgressPanel, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4) })
 
         section("2 · PLAYLIST SALVATE")
-        label("Le copie salvate restano sul dispositivo anche dopo la chiusura dell'app, finché non le elimini.", MUTED, 12f)
+        label("Le playlist salvate restano sul dispositivo anche dopo la chiusura e il riavvio. Si eliminano solo su tua richiesta.", MUTED, 12f)
         savedPlaylistsList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         root.addView(savedPlaylistsList)
         button("🗑  Svuota archivio e lista canali", false) { confirmClearSavedPlaylists() }
@@ -1705,7 +1707,7 @@ class MainActivity : FragmentActivity() {
                 maxLines = 2
             }
             row.addView(name, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            row.addView(buttonView("Carica") { loadSavedPlaylist(file) })
+            row.addView(buttonView("▶  APRI PLAYLIST") { loadSavedPlaylist(file) })
             savedPlaylistsList.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                 bottomMargin = dp(5)
             })
@@ -2037,7 +2039,7 @@ class MainActivity : FragmentActivity() {
             }
             val play = Button(this).apply {
                 tag = channel.name
-                text = if (isPlayingChannel) "▶  IN ONDA · ${channel.name}" else "▶  ${channel.name}"
+                text = if (isPlayingChannel) "▶  IN RIPRODUZIONE · ${channel.name}" else "▶  AVVIA CANALE · ${channel.name}"
                 isAllCaps = false
                 textSize = 13f
                 gravity = Gravity.CENTER_VERTICAL or Gravity.START
@@ -2102,8 +2104,9 @@ class MainActivity : FragmentActivity() {
                     setPadding(dp(9), 0, 0, 0)
                 }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
                 header.addView(TextView(this).apply {
-                    text = "$total  ·  ${if (expanded) "⌃" else "⌄"}"
-                    textSize = 12f
+                    text = "${if (expanded) "⌃  TOCCA PER CHIUDERE" else "⌄  TOCCA PER APRIRE"}  ·  $total"
+                    textSize = 10f
+                    setTypeface(null, android.graphics.Typeface.BOLD)
                     setTextColor(CYAN)
                 })
                 run {
@@ -2372,7 +2375,11 @@ class MainActivity : FragmentActivity() {
     private fun restoreChannelLibraryAsync() {
         val file = channelLibraryFile()
         val interruptedWriteBackup = java.io.File(file.path + ".bak")
-        if (!file.isFile && !interruptedWriteBackup.isFile) return
+        if (!file.isFile && !interruptedWriteBackup.isFile) {
+            restoreMostRecentSavedPlaylist()
+            return
+        }
+        channelLibraryRestorePending = true
 
         val restoreExecutor = Executors.newSingleThreadExecutor { task ->
             Thread(task, "DAVIX-Restore").apply { isDaemon = true }
@@ -2411,6 +2418,7 @@ class MainActivity : FragmentActivity() {
 
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
+                channelLibraryRestorePending = false
                 restored.onSuccess { (restoredChannels, restoredCategories, restoredExpanded) ->
                     channels.clear()
                     channels.addAll(restoredChannels)
@@ -2423,13 +2431,25 @@ class MainActivity : FragmentActivity() {
                     // Migrazione una tantum: gli archivi precedenti partivano tutti selezionati.
                     // Dalla versione 2 in poi lo stato scelto dall'utente viene mantenuto.
                     if (legacySelectionReset) persistChannelLibrary()
+                    if (channels.isEmpty()) restoreMostRecentSavedPlaylist()
                 }.onFailure {
                     // Non cancellare o sovrascrivere un archivio illeggibile: serve per diagnosi e recupero.
                     Log.e("DAVIX-ARCHIVE", "Archivio canali non leggibile; file conservato per diagnosi", it)
+                    restoreMostRecentSavedPlaylist()
                 }
                 restoreExecutor.shutdown()
             }
         }
+    }
+
+    private fun restoreMostRecentSavedPlaylist() {
+        if (importInProgress || channels.isNotEmpty()) return
+        val latest = savedPlaylistDirectory().listFiles()
+            ?.filter { it.isFile }
+            ?.maxByOrNull { it.lastModified() }
+            ?: return
+        Log.i("DAVIX-ARCHIVE", "Ripristino automatico playlist salvata: ${latest.name}")
+        loadSavedPlaylist(latest)
     }
 
     private fun loadCategorySettings() {
@@ -2632,7 +2652,7 @@ class MainActivity : FragmentActivity() {
     }
 
     override fun onStop() {
-        persistChannelLibrary(immediate = true)
+        if (!channelLibraryRestorePending) persistChannelLibrary(immediate = true)
         saveCategorySettings()
         retryHandler.removeCallbacks(playbackInfoTask)
         // Non lasciare il flusso attivo quando l'app passa davvero in background.
