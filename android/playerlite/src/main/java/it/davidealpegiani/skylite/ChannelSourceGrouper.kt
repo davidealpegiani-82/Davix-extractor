@@ -31,7 +31,7 @@ internal object ChannelSourceGrouper {
         Regex("""(?i)\bS\d{1,2}\s*E\d{1,3}\b|\b\d{1,2}x\d{1,3}\b""")
 
     private val qualityPattern = Regex(
-        """(?i)\\b(8k|4k|uhd|fhd|full\\s*hd|hd|sd|2160p|1080p|1080i|720p|576p|480p|hevc|h[ .]?265|x265|h[ .]?264|x264|hdr10\\+?|50\\s*fps|60\\s*fps)\\b"""
+        """(?i)\b(8k|4k|uhd|fhd|full\s*hd|hd|sd|2160p|1080p|1080i|720p|576p|480p|hevc|h[ .]?265|x265|h[ .]?264|x264|hdr10\+?|50\s*fps|60\s*fps)\b"""
     )
 
     private val vodPathSegments = setOf(
