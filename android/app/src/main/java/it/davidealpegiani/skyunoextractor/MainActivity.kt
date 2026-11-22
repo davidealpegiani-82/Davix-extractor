@@ -1733,7 +1733,11 @@ class MainActivity : FragmentActivity() {
                             val mapping = runCatching { JSONObject(savedMappingJson) }.getOrDefault(JSONObject())
                             found.forEach { channel ->
                                 val savedCategory = normalizeCategoryPath(mapping.optString(channel.url))
-                                if (savedCategory.isNotBlank()) channel.category = savedCategory
+                                channel.category = when {
+                                    savedCategory.isBlank() -> inferUrlCategoryPath(channel)
+                                    isAutomaticallyClassifiedUrlCategory(savedCategory) -> inferUrlCategoryPath(channel)
+                                    else -> savedCategory // Le scelte manuali dell'utente hanno sempre la precedenza.
+                                }
                             }
                             runOnUiThread {
                                 if (isFinishing || isDestroyed) {
