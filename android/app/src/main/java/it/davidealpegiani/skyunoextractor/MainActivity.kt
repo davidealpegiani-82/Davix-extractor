@@ -1549,7 +1549,10 @@ class MainActivity : FragmentActivity() {
                                     } else {
                                         val savedManualPath = normalizeCategoryPath(channel.category)
                                         val inferred = inferCategoryPath(channel)
-                                        if (savedManualPath.contains(" > ") && savedManualPath in knownCategories) savedManualPath else inferred
+                                        val preserveManualPath = savedManualPath.isNotBlank() &&
+                                            !isAutomaticallyClassifiedUrlCategory(savedManualPath) &&
+                                            (savedManualPath in knownCategories || savedManualPath.contains(" > "))
+                                        if (preserveManualPath) savedManualPath else inferred
                                     }
                                     knownCategories.add(channel.category)
                                     val key = channel.name.lowercase(Locale.ROOT) + "|" + channel.url
