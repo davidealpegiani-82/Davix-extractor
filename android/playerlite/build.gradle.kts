@@ -56,6 +56,9 @@ android {
 
 dependencies {
     testImplementation("junit:junit:4.13.2")
+    // Android's org.json stubs throw "not mocked" in local JVM unit tests.
+    // Use the real JSON implementation on the test classpath.
+    testImplementation("org.json:json:20240303")
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.media3:media3-exoplayer:1.11.1")
     implementation("androidx.media3:media3-exoplayer-hls:1.11.1")
