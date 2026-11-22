@@ -20,13 +20,25 @@ internal object IptvSourceSettings {
     private const val MANDRAKODI = "mandrakodi_catalog_url"
     private const val MANDRAKODI_PASSWORD = "mandrakodi_password"
     private const val MANDRAKODI_DEVICE_ID = "mandrakodi_device_id"
-    private const val MANDRAKODI_ADDON_VERSION = "1.3.3"
+    private const val MANDRAKODI_ADDON_VERSION = "mandrakodi_addon_version"
+    private const val DEFAULT_MANDRAKODI_ADDON_VERSION = "2.2.1.e"
 
     fun playlistUrl(context: Context): String = read(context, PLAYLIST).orEmpty()
     fun epgUrl(context: Context): String = read(context, EPG).orEmpty()
     fun mandraKodiUrl(context: Context): String = read(context, MANDRAKODI).orEmpty()
     fun mandraKodiPassword(context: Context): String = read(context, MANDRAKODI_PASSWORD).orEmpty()
     fun mandraKodiDeviceId(context: Context): String = read(context, MANDRAKODI_DEVICE_ID).orEmpty()
+    fun mandraKodiAddonVersion(context: Context): String = read(context, MANDRAKODI_ADDON_VERSION).orEmpty().ifBlank { DEFAULT_MANDRAKODI_ADDON_VERSION }
+
+    fun saveMandraKodiAddonVersion(context: Context, version: String) {
+        val clean = version.trim()
+        require(clean.matches(Regex("[A-Za-z0-9._-]{1,32}"))) {
+            "Versione add-on MandraKodi non valida."
+        }
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(MANDRAKODI_ADDON_VERSION, encrypt(clean))
+            .apply()
+    }
 
     /** Imports only the MandraKodi values needed for its documented HTTP User-Agent. */
     fun saveMandraKodiCredentials(context: Context, password: String, deviceId: String) {
@@ -50,7 +62,7 @@ internal object IptvSourceSettings {
         require(password.isNotBlank() && deviceId.matches(Regex("[A-Z0-9]{6}"))) {
             "Importa prima le impostazioni MandraKodi da Kodi."
         }
-        return "MandraKodi2@@$MANDRAKODI_ADDON_VERSION@@$password@@$deviceId"
+        return "MandraKodi2@@${mandraKodiAddonVersion(context)}@@$password@@$deviceId"
     }
 
     fun save(context: Context, playlistUrl: String, epgUrl: String, mandraKodiCatalogUrl: String = mandraKodiUrl(context)) {

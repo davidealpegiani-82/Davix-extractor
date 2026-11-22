@@ -541,6 +541,7 @@ class MainActivity : FragmentActivity() {
         button("🔗  Configura URL M3U ed EPG", false) { showIptvSourceSettings() }
         button("🌐  Importa playlist direttamente da URL", true) { importPlaylistFromUrl() }
         button("🛰  Sincronizza catalogo MandraKodi", false) { importMandraKodiCatalog() }
+        button("🧭  Esplora catalogo MandraKodi", true) { browseMandraKodiCatalog() }
         button("📂  Seleziona file", false) { showImportDestinationDialog() }
         status = label("Nessun file caricato.", MUTED)
         importProgressPanel = LinearLayout(this).apply {
@@ -666,6 +667,12 @@ class MainActivity : FragmentActivity() {
             transformationMethod = android.text.method.PasswordTransformationMethod.getInstance()
             setText(IptvSourceSettings.epgUrl(this@MainActivity))
         }
+        val mandraKodiVersionInput = EditText(this).apply {
+            hint = "2.2.1.e"
+            setSingleLine(true)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT
+            setText(IptvSourceSettings.mandraKodiAddonVersion(this@MainActivity))
+        }
         val mandraKodiInput = EditText(this).apply {
             hint = "https://…/catalogo.m3u oppure catalogo.json"
             setSingleLine(true)
@@ -676,7 +683,9 @@ class MainActivity : FragmentActivity() {
         content.addView(playlistInput)
         content.addView(labelForDialog("URL GUIDA XMLTV · credenziali nascoste"))
         content.addView(epgInput)
-        content.addView(labelForDialog("URL CATALOGO MANDRAKODI · feed M3U/JSON diretto"))
+        content.addView(labelForDialog("VERSIONE ADD-ON MANDRAKODI · deve corrispondere a quella installata in Kodi"))
+        content.addView(mandraKodiVersionInput)
+        content.addView(labelForDialog("URL CATALOGO MANDRAKODI · feed M3U/JSON diretto (facoltativo)"))
         content.addView(mandraKodiInput)
         content.addView(labelForDialog("Gli indirizzi vengono cifrati sul dispositivo. MandraKodi deve fornire un feed diretto M3U/JSON accessibile; menu Kodi, script e azioni resolver non vengono eseguiti."))
         AlertDialog.Builder(this)
@@ -699,6 +708,7 @@ class MainActivity : FragmentActivity() {
                                 epgInput.text.toString(),
                                 mandraKodiInput.text.toString()
                             )
+                            IptvSourceSettings.saveMandraKodiAddonVersion(this, mandraKodiVersionInput.text.toString())
                             dialog.dismiss()
                             toast("URL M3U ed XMLTV salvati in modo protetto.")
                         } catch (e: Exception) {
@@ -777,6 +787,184 @@ class MainActivity : FragmentActivity() {
             return
         }
         importCatalogFromUrl(address, "MandraKodi")
+    }
+
+    private fun browseMandraKodiCatalog() {
+        val userAgent = runCatching { IptvSourceSettings.mandraKodiUserAgent(this) }.getOrElse {
+            toast(it.message ?: "Importa prima le impostazioni MandraKodi da Kodi.")
+            showIptvSourceSettings()
+            return
+        }
+        val client = MandraKodiCatalogClient(userAgent)
+        status.text = "Caricamento del menu MandraKodi…"
+        updateImportProgress("Apertura catalogo MandraKodi…", null)
+        Thread({
+            try {
+                val page = client.loadRoot()
+                runOnUiThread {
+                    finishImportProgress()
+                    if (!isFinishing && !isDestroyed) {
+                        status.text = "Menu MandraKodi caricato · ${page.entries.size} voci. L’accesso viene verificato aprendo una sezione."
+                        showMandraKodiPage(client, page, "MandraKodi", null, null)
+                    }
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    finishImportProgress()
+                    if (!isFinishing && !isDestroyed) {
+                        status.text = "Catalogo MandraKodi non raggiungibile: ${error.message ?: "errore di rete"}"
+                        toast(status.text.toString())
+                    }
+                }
+            }
+        }, "DAVIX-MandraKodi-Root").apply { isDaemon = true }.start()
+    }
+
+    private fun showMandraKodiPage(
+        client: MandraKodiCatalogClient,
+        page: MandraKodiCatalogPage,
+        categoryPath: String,
+        parentPage: MandraKodiCatalogPage?,
+        parentCategoryPath: String?
+    ) {
+        if (isFinishing || isDestroyed) return
+        val labels = page.entries.map { entry ->
+            if (entry.isFolder) "📁  ${entry.title}" else "▶  ${entry.title}"
+        }.toTypedArray()
+        val streams = page.entries.filter { !it.isFolder && !it.streamUrl.isNullOrBlank() }
+        val builder = AlertDialog.Builder(this)
+            .setTitle(page.title)
+            .setItems(labels) { _, index ->
+                val entry = page.entries[index]
+                if (!entry.isFolder) {
+                    entry.streamUrl?.let { url ->
+                        val category = entry.category.ifBlank { categoryPath }
+                        importMandraKodiChannels(listOf(TvChannel(
+                            name = entry.title,
+                            url = url,
+                            logo = entry.logoUrl,
+                            category = category
+                        )))
+                    }
+                } else {
+                    status.text = "Apertura sezione ${entry.title}…"
+                    updateImportProgress("Lettura sezione MandraKodi…", null)
+                    Thread({
+                        try {
+                            val child = client.open(entry, page.sourceUrl)
+                            runOnUiThread {
+                                finishImportProgress()
+                                if (!isFinishing && !isDestroyed) {
+                                    val childPath = if (categoryPath.isBlank()) entry.title else "$categoryPath > ${entry.title}"
+                                    status.text = "Sezione ${entry.title} · ${child.entries.size} voci."
+                                    showMandraKodiPage(client, child, childPath, page, categoryPath)
+                                }
+                            }
+                        } catch (error: Exception) {
+                            runOnUiThread {
+                                finishImportProgress()
+                                if (!isFinishing && !isDestroyed) {
+                                    status.text = "Impossibile aprire la sezione: ${error.message ?: "errore di rete"}"
+                                    toast(status.text.toString())
+                                }
+                            }
+                        }
+                    }, "DAVIX-MandraKodi-Menu").apply { isDaemon = true }.start()
+                }
+            }
+            .setNegativeButton(if (parentPage == null) "Chiudi" else "Indietro") { _, _ ->
+                if (parentPage != null) {
+                    showMandraKodiPage(client, parentPage, parentCategoryPath.orEmpty(), null, null)
+                }
+            }
+        if (streams.isNotEmpty()) {
+            builder.setPositiveButton("Importa tutti i flussi diretti (${streams.size})") { _, _ ->
+                val channelsToImport = streams.map { entry ->
+                    TvChannel(
+                        name = entry.title,
+                        url = entry.streamUrl.orEmpty(),
+                        logo = entry.logoUrl,
+                        category = entry.category.ifBlank { categoryPath }
+                    )
+                }
+                importMandraKodiChannels(channelsToImport)
+            }
+        }
+        builder.show()
+    }
+
+    private fun importMandraKodiChannels(incoming: List<TvChannel>) {
+        if (incoming.isEmpty()) return
+        if (importInProgress) {
+            toast("È già in corso un'importazione.")
+            return
+        }
+        importInProgress = true
+        status.text = "Preparazione di ${incoming.size} voci MandraKodi…"
+        updateImportProgress("Classificazione canali MandraKodi…", null)
+        val existingKeys = channels.map { it.name.lowercase(Locale.ROOT) + "|" + it.url }.toHashSet()
+        val savedMappingJson = categoryPrefs.getString("channel_categories_json", "{}") ?: "{}"
+        Thread({
+            try {
+                val savedMapping = runCatching { JSONObject(savedMappingJson) }.getOrDefault(JSONObject())
+                val seen = existingKeys.toMutableSet()
+                val prepared = incoming.map { channel ->
+                    val saved = normalizeCategoryPath(savedMapping.optString(channel.url))
+                    val source = normalizeCategoryPath(channel.category)
+                    val inferred = inferUrlCategoryPath(channel.copy(category = source))
+                    val manual = saved.isNotBlank() && !isAutomaticallyClassifiedUrlCategory(saved)
+                    channel.category = if (manual) saved else if (source.isNotBlank()) source else inferred
+                    val key = channel.name.lowercase(Locale.ROOT) + "|" + channel.url
+                    Triple(channel, key, !seen.add(key))
+                }
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) {
+                        importInProgress = false
+                        return@runOnUiThread
+                    }
+                    var added = 0
+                    var duplicates = 0
+                    var reorganized = 0
+                    val existingByKey = channels.associateBy {
+                        it.name.lowercase(Locale.ROOT) + "|" + it.url
+                    }
+                    prepared.forEach { (channel, key, duplicate) ->
+                        if (duplicate) {
+                            duplicates++
+                            val existing = existingByKey[key]
+                            if (existing != null &&
+                                isAutomaticallyClassifiedUrlCategory(existing.category) &&
+                                existing.category != channel.category
+                            ) {
+                                existing.category = channel.category
+                                reorganized++
+                            }
+                        } else {
+                            channel.selected = false
+                            channels.add(channel)
+                            categories.add(channel.category)
+                            added++
+                        }
+                    }
+                    renderChannels()
+                    saveCategorySettings()
+                    persistChannelLibrary()
+                    renderSavedPlaylists()
+                    importInProgress = false
+                    finishImportProgress()
+                    status.text = "MandraKodi analizzato · ${incoming.size} flussi · $added nuovi · $reorganized riclassificati · $duplicates già presenti."
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    importInProgress = false
+                    finishImportProgress()
+                    if (!isFinishing && !isDestroyed) {
+                        status.text = "Importazione MandraKodi non riuscita: ${error.message ?: "errore inatteso"}"
+                        toast(status.text.toString())
+                    }
+                }
+            }
+        }, "DAVIX-MandraKodi-Import").apply { isDaemon = true }.start()
     }
 
     // Keep the original entry point stable for existing UI and regression checks.
