@@ -697,7 +697,8 @@ class MainActivity : FragmentActivity() {
             toast("Configura prima l'URL della playlist M3U.")
             showIptvSourceSettings()
             return
-        }        importInProgress = true
+        }
+        importInProgress = true
         status.text = "Download playlist IPTV in corso…"
         updateImportProgress("Connessione alla sorgente IPTV…", null)
         Thread({
@@ -1396,7 +1397,8 @@ class MainActivity : FragmentActivity() {
         // la presenza di prove episodiche o di un percorso VOD deve prevalere.
         val isVod = strongVod || (liveStreamExtension && (seriesEvidence || movieEvidence))
         if (isVod) {
-            val isSeries = seriesEvidence && !moviePath            val genre = if (isSeries) {
+            val isSeries = seriesEvidence && !moviePath
+            val genre = if (isSeries) {
                 when {
                     has("crime", "poliziesco", "investig", "detective", "gangster", "thriller") -> "Crime e Thriller"
                     has("commedia", "comedy", "sitcom", "comico") -> "Commedia"
@@ -1426,8 +1428,6 @@ class MainActivity : FragmentActivity() {
 
         // Un'etichetta live è considerata valida solo in assenza di segnali VOD.
         // L'estensione .m3u8/.ts da sola non basta: alcuni provider la usano per VOD.
-        // Tassonomia editoriale: i brand Sky e delle piattaforme sono riconosciuti
-        // prima delle etichette generiche inserite dai provider nelle playlist.
         val liveCategory = when {
             has("xxx", "adult", "adulti", "erotic") -> "Adult"
             has("sky cinema", "sky primafila", "cinema collection", "cinema stories", "cinema family", "cinema action", "cinema suspense", "cinema comedy", "cinema romance", "cinema drama", "paramount network", "film channel", "movie channel") -> "Cinema"
@@ -1445,8 +1445,6 @@ class MainActivity : FragmentActivity() {
             has("cartoon", "cartoni", "boing", "k2", "nickelodeon", "cartoonito", "disney junior", "kids", "bambini", "baby tv") -> "Bambini"
             has("music", "musica", "mtv", "concert", "radio", "vevo") -> "Musica"
             has("regional", "regionale", "local tv", "telelombardia", "telecity", "telenova") -> "Regionali"
-            // Sky Uno è intrattenimento; Sky Sport Uno viene intercettato prima
-            // dalla regola Sport e non può finire nella cartella sbagliata.
             has("sky uno", "sky atlantic", "sky serie", "sky investigation", "sky crime", "sky arte", "sky reality", "sky family", "sky show", "sky witness", "sky living", "sky comedy", "sky max", "sky showcase", "sky replay", "rai 1", "rai 2", "rai 3", "canale 5", "italia 1", "rete 4", "la7", "nove", "tv8", "real time", "dmax", "general", "entertainment", "intrattenimento", "reality", "masterchef", "x factor") -> "Intrattenimento"
             has("international", "internazional", "world", "estero", "foreign") -> "Internazionali"
             else -> "Altri canali"
@@ -2106,7 +2104,8 @@ class MainActivity : FragmentActivity() {
                     textSize = 18f
                     gravity = Gravity.CENTER
                 }, LinearLayout.LayoutParams(dp(28), dp(36)))
-                titleRow.addView(TextView(this).apply {                    text = node.name
+                titleRow.addView(TextView(this).apply {
+                    text = node.name
                     textSize = if (depth == 0) 15f else 14f
                     setTextColor(Color.WHITE)
                     setTypeface(null, android.graphics.Typeface.BOLD)
