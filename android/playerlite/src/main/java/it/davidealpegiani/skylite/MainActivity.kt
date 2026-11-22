@@ -45,8 +45,6 @@ import androidx.media3.ui.PlayerView
 import org.json.JSONArray
 import org.json.JSONObject
 
-private data class CloudChannel(val name: String, val url: String, val logo: String = "", val category: String = "Non classificati", val tvgId: String = "", val tvgName: String = "")
-private data class ChannelSourceGroup(val key: String, val name: String, val sources: List<CloudChannel>)
 
 @UnstableApi
 class MainActivity : Activity() {
@@ -787,33 +785,8 @@ class MainActivity : Activity() {
      * accorpati. tvg-id prevale sul nome, mentre il nome viene normalizzato
      * rimuovendo esclusivamente etichette tecniche di qualità.
      */
-    private fun groupChannels(items: List<CloudChannel>): List<ChannelSourceGroup> {
-        val buckets = LinkedHashMap<String, MutableList<CloudChannel>>()
-        items.forEach { channel ->
-            val category = channel.category.trim().lowercase(java.util.Locale.ROOT)
-            val searchableType = (channel.category + " " + channel.name + " " + channel.url).lowercase(java.util.Locale.ROOT)
-            val mediaKind = if (
-                Regex("\\b(film|movie|serie|series|vod|on\\s*demand)\\b").containsMatchIn(searchableType) ||
-                Regex("\\b(s[0-9]{1,2}e[0-9]{1,3}|[0-9]{1,2}x[0-9]{1,3})\\b", RegexOption.IGNORE_CASE).containsMatchIn(searchableType)
-            ) "vod" else "live"
-            val identity = channel.tvgId.trim().takeIf { it.isNotBlank() }
-                ?.let { "id:" + it.lowercase(java.util.Locale.ROOT) }
-                ?: run {
-                    val normalized = channel.name.lowercase(java.util.Locale.ROOT)
-                        .replace(Regex("\\b(8k|4k|uhd|fhd|full\\s*hd|hd|sd|2160p|1080p|1080i|720p|576p|480p|hevc|h[ .]?265|x265|h[ .]?264|x264|hdr10\\+?|50\\s*fps|60\\s*fps)\\b", RegexOption.IGNORE_CASE), " ")
-                        .replace(Regex("[^\\p{L}\\p{N}]+"), " ")
-                        .trim().replace(Regex("\\s+"), " ")
-                    "name:$normalized"
-                }
-            // Category is editorial metadata, not channel identity. Variants
-            // remain grouped even when providers assign different group-title values.
-            val key = "$mediaKind|$identity"
-            buckets.getOrPut(key) { mutableListOf() }.add(channel)
-        }
-        return buckets.map { (key, sources) ->
-            ChannelSourceGroup(key, sources.first().name, sources.distinctBy { it.url })
-        }
-    }
+    private fun groupChannels(items: List<CloudChannel>): List<ChannelSourceGroup> =
+        ChannelSourceGrouper.group(items)
 
     private fun preferredSource(group: ChannelSourceGroup): CloudChannel {
         val savedUrl = selectedSourceByGroup[group.key]
