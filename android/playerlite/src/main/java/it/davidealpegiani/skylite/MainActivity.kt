@@ -800,7 +800,7 @@ class MainActivity : Activity() {
                 ?.let { "id:" + it.lowercase(java.util.Locale.ROOT) }
                 ?: run {
                     val normalized = channel.name.lowercase(java.util.Locale.ROOT)
-                        .replace(Regex("\\b(4k|uhd|fhd|full\\s*hd|hd|sd|1080p|720p|2160p)\\b", RegexOption.IGNORE_CASE), " ")
+                        .replace(Regex("\\b(8k|4k|uhd|fhd|full\\s*hd|hd|sd|2160p|1080p|1080i|720p|576p|480p|hevc|h[ .]?265|x265|h[ .]?264|x264|hdr10\\+?|50\\s*fps|60\\s*fps)\\b", RegexOption.IGNORE_CASE), " ")
                         .replace(Regex("[^\\p{L}\\p{N}]+"), " ")
                         .trim().replace(Regex("\\s+"), " ")
                     "name:$normalized"
