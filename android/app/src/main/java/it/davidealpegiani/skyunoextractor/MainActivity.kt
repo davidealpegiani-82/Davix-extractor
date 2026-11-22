@@ -707,10 +707,15 @@ class MainActivity : FragmentActivity() {
             showIptvSourceSettings()
             return
         }
-        importPlaylistFromUrl(address, "MandraKodi")
+        importCatalogFromUrl(address, "MandraKodi")
     }
 
-    private fun importPlaylistFromUrl(addressOverride: String? = null, sourceLabel: String = "Playlist URL") {
+    // Keep the original entry point stable for existing UI and regression checks.
+    private fun importPlaylistFromUrl() {
+        importCatalogFromUrl(null, "Playlist URL")
+    }
+
+    private fun importCatalogFromUrl(addressOverride: String?, sourceLabel: String) {
         if (importInProgress) { toast("È già in corso un'importazione."); return }
         val address = addressOverride ?: IptvSourceSettings.playlistUrl(this)
         if (address.isBlank()) {
