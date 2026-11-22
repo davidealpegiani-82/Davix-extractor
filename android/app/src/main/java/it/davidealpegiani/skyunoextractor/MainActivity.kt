@@ -507,7 +507,7 @@ class MainActivity : FragmentActivity() {
             useController = true
             setShowBuffering(PlayerView.SHOW_BUFFERING_ALWAYS)
             setBackgroundColor(Color.BLACK)
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(176))
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(if (resources.configuration.smallestScreenWidthDp < 600) 128 else 176))
         }
         playerDock.addView(playerView)
         playbackInfo = TextView(this).apply {
