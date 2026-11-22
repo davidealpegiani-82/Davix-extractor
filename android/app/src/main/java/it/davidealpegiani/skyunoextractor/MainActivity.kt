@@ -535,6 +535,7 @@ class MainActivity : FragmentActivity() {
         label("Importa da un file oppure collega direttamente la tua playlist IPTV e la guida XMLTV tramite URL.", MUTED)
         button("🔗  Configura URL M3U ed EPG", false) { showIptvSourceSettings() }
         button("🌐  Importa playlist direttamente da URL", true) { importPlaylistFromUrl() }
+        button("🛰  Sincronizza catalogo MandraKodi", false) { importMandraKodiCatalog() }
         button("📂  Seleziona file", false) { showImportDestinationDialog() }
         status = label("Nessun file caricato.", MUTED)
         importProgressPanel = LinearLayout(this).apply {
@@ -660,11 +661,19 @@ class MainActivity : FragmentActivity() {
             transformationMethod = android.text.method.PasswordTransformationMethod.getInstance()
             setText(IptvSourceSettings.epgUrl(this@MainActivity))
         }
+        val mandraKodiInput = EditText(this).apply {
+            hint = "https://…/catalogo.m3u oppure catalogo.json"
+            setSingleLine(true)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
+            setText(IptvSourceSettings.mandraKodiUrl(this@MainActivity))
+        }
         content.addView(labelForDialog("URL PLAYLIST M3U · credenziali nascoste"))
         content.addView(playlistInput)
         content.addView(labelForDialog("URL GUIDA XMLTV · credenziali nascoste"))
         content.addView(epgInput)
-        content.addView(labelForDialog("Gli indirizzi vengono cifrati sul dispositivo. La sorgente XMLTV viene trasferita al Player solo tramite Cloud Sync HTTPS e conservata cifrata anche sul server e sul Player."))
+        content.addView(labelForDialog("URL CATALOGO MANDRAKODI · feed M3U/JSON diretto"))
+        content.addView(mandraKodiInput)
+        content.addView(labelForDialog("Gli indirizzi vengono cifrati sul dispositivo. MandraKodi deve fornire un feed diretto M3U/JSON accessibile; menu Kodi, script e azioni resolver non vengono eseguiti."))
         AlertDialog.Builder(this)
             .setTitle("Sorgenti IPTV / EPG")
             .setView(content)
@@ -677,7 +686,8 @@ class MainActivity : FragmentActivity() {
                             IptvSourceSettings.save(
                                 this,
                                 playlistInput.text.toString(),
-                                epgInput.text.toString()
+                                epgInput.text.toString(),
+                                mandraKodiInput.text.toString()
                             )
                             dialog.dismiss()
                             toast("URL M3U ed XMLTV salvati in modo protetto.")
@@ -690,17 +700,27 @@ class MainActivity : FragmentActivity() {
             }
     }
 
-    private fun importPlaylistFromUrl() {
+    private fun importMandraKodiCatalog() {
+        val address = IptvSourceSettings.mandraKodiUrl(this)
+        if (address.isBlank()) {
+            toast("Configura prima l’URL del catalogo MandraKodi.")
+            showIptvSourceSettings()
+            return
+        }
+        importPlaylistFromUrl(address, "MandraKodi")
+    }
+
+    private fun importPlaylistFromUrl(addressOverride: String? = null, sourceLabel: String = "Playlist URL") {
         if (importInProgress) { toast("È già in corso un'importazione."); return }
-        val address = IptvSourceSettings.playlistUrl(this)
+        val address = addressOverride ?: IptvSourceSettings.playlistUrl(this)
         if (address.isBlank()) {
             toast("Configura prima l'URL della playlist M3U.")
             showIptvSourceSettings()
             return
         }
         importInProgress = true
-        status.text = "Download playlist IPTV in corso…"
-        updateImportProgress("Connessione alla sorgente IPTV…", null)
+        status.text = "Download catalogo $sourceLabel in corso…"
+        updateImportProgress("Connessione alla sorgente $sourceLabel…", null)
         Thread({
             try {
                 val connection = (URL(address).openConnection() as HttpURLConnection).apply {
@@ -741,7 +761,7 @@ class MainActivity : FragmentActivity() {
                 }
                 if (found.isEmpty()) throw IllegalStateException("Il collegamento non ha restituito una playlist M3U valida.")
                 updateImportProgress("Analisi completata · classificazione e controllo duplicati…", 85)
-                savePlaylistCopy("playlist-remota.m3u", bytes)
+                savePlaylistCopy(if (sourceLabel == "MandraKodi") "mandrakodi-catalogo.m3u" else "playlist-remota.m3u", bytes)
 
                 // La classificazione URL e il controllo duplicati sono CPU-bound:
                 // eseguirli sul thread UI causava ANR con playlist molto grandi.
@@ -858,7 +878,7 @@ class MainActivity : FragmentActivity() {
                                             renderSavedPlaylists()
                                             importInProgress = false
                                             finishImportProgress()
-                                            status.text = "Playlist URL analizzata · ${found.size} canali letti · $added nuovi · $reorganized riclassificati · $duplicates già presenti."
+                                            status.text = "Catalogo $sourceLabel analizzato · ${found.size} elementi letti · $added nuovi · $reorganized riclassificati · $duplicates già presenti."
                                         }
                                     }
                                 }
@@ -881,7 +901,7 @@ class MainActivity : FragmentActivity() {
                     importInProgress = false
                     finishImportProgress()
                     if (!isFinishing && !isDestroyed) {
-                        status.text = "Download M3U non riuscito: " + (error.message ?: "errore di rete")
+                        status.text = "Download $sourceLabel non riuscito: " + (error.message ?: "errore di rete")
                         toast(status.text.toString())
                     }
                 }
@@ -1949,23 +1969,34 @@ class MainActivity : FragmentActivity() {
         try {
             val trimmed = text.trim()
             val rootObject = if (trimmed.startsWith("{")) JSONObject(trimmed) else null
-            val array = when {
-                trimmed.startsWith("[") -> JSONArray(trimmed)
-                rootObject != null -> rootObject.optJSONArray("channels")
-                    ?: rootObject.optJSONArray("items")
-                    ?: rootObject.optJSONArray("data")
-                else -> null
+            fun readArray(array: JSONArray, inheritedCategory: String = "") {
+                for (i in 0 until array.length()) {
+                    val o = array.optJSONObject(i) ?: continue
+                    add(
+                        o.optString("name", o.optString("title", o.optString("channel_name"))),
+                        o.optString("url", o.optString("stream", o.optString("stream_url", o.optString("src", o.optString("link"))))),
+                        o.optString("logo", o.optString("thumbnail", o.optString("tvg-logo"))),
+                        o.optString("category", o.optString("group", o.optString("group-title", inheritedCategory))),
+                        o.optString("tvg-id", o.optString("tvgId", o.optString("epg_id"))),
+                        o.optString("tvg-name", o.optString("tvgName"))
+                    )
+                }
             }
-            if (array != null) for (i in 0 until array.length()) {
-                val o = array.optJSONObject(i) ?: continue
-                add(
-                    o.optString("name", o.optString("title", o.optString("channel_name"))),
-                    o.optString("url", o.optString("stream", o.optString("src", o.optString("link")))),
-                    o.optString("logo", o.optString("tvg-logo")),
-                    o.optString("category", o.optString("group", o.optString("group-title"))),
-                    o.optString("tvg-id", o.optString("tvgId", o.optString("epg_id"))),
-                    o.optString("tvg-name", o.optString("tvgName"))
-                )
+            if (trimmed.startsWith("[")) {
+                readArray(JSONArray(trimmed))
+            } else if (rootObject != null) {
+                rootObject.optJSONArray("channels")?.let { readArray(it) }
+                rootObject.optJSONArray("stations")?.let { readArray(it) }
+                rootObject.optJSONArray("items")?.let { readArray(it) }
+                rootObject.optJSONArray("data")?.let { readArray(it) }
+                rootObject.optJSONArray("groups")?.let { groups ->
+                    for (i in 0 until groups.length()) {
+                        val group = groups.optJSONObject(i) ?: continue
+                        val category = group.optString("name", group.optString("title"))
+                        group.optJSONArray("stations")?.let { readArray(it, category) }
+                        group.optJSONArray("channels")?.let { readArray(it, category) }
+                    }
+                }
             }
         } catch (_: Exception) { }
         onProgress?.invoke(100)
