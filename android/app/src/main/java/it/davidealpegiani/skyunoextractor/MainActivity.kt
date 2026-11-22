@@ -1356,7 +1356,15 @@ class MainActivity : FragmentActivity() {
             .replace(Regex("\\s+"), " ").trim()
         val url = channel.url.lowercase(Locale.ROOT)
         val path = runCatching { Uri.parse(channel.url).path.orEmpty().lowercase(Locale.ROOT) }.getOrDefault("")
-        val source = "$group $name"
+        // Le sorgenti IPTV spesso hanno nomi commerciali poco descrittivi:
+        // group-title, tvg-name, tvg-id e percorso URL sono indizi complementari.
+        val tvgName = channel.tvgName.lowercase(Locale.ROOT)
+            .replace('_', ' ').replace('-', ' ').replace(Regex("\\s+"), " ").trim()
+        val tvgId = channel.tvgId.lowercase(Locale.ROOT)
+            .replace(Regex("[^a-z0-9]+"), " ").trim()
+        val urlHints = (path + " " + url.substringBefore('?').substringAfterLast('/'))
+            .replace(Regex("[._-]+"), " ").replace(Regex("\\s+"), " ").trim()
+        val source = "$group $name $tvgName $tvgId $urlHints"
         fun hasIn(value: String, vararg terms: String) = terms.any { value.contains(it) }
         fun has(vararg terms: String) = hasIn(source, *terms)
         fun tokenIn(value: String, vararg terms: String) = terms.any {
@@ -1475,41 +1483,10 @@ class MainActivity : FragmentActivity() {
         return path in generated || legacy.any { path == it || path.startsWith("$it > ") }
     }
 
-    private fun inferCategoryPath(channel: TvChannel): String {
-        val source = "${channel.name} ${channel.category}".lowercase(Locale.ROOT)
-            .replace('_', ' ').replace('-', ' ')
-        fun has(vararg terms: String) = terms.any { source.contains(it) }
-
-        val rules = listOf(
-            "Sport > Calcio" to arrayOf("calcio", "football", "soccer", "serie a", "serie b", "champions", "europa league", "conference league", "premier league", "liga", "bundesliga", "ligue 1", "coppa italia", "mondiale", "europei"),
-            "Sport > Motori" to arrayOf("formula 1", "formula1", "f1", "motogp", "moto gp", "superbike", "wrc", "rally", "motori", "nascar"),
-            "Sport > Tennis" to arrayOf("tennis", "atp", "wta", "roland garros", "wimbledon"),
-            "Sport > Basket" to arrayOf("basket", "basketball", "nba", "euroleague"),
-            "Sport > Altri sport" to arrayOf("sport", "dazn", "eurosport", "sky sport", "sportitalia", "golf", "rugby", "volley", "pallavolo", "ciclismo", "cycling", "olimpiadi"),
-            "Cinema > Cinema italiano" to arrayOf("cinema italiano", "film italiani"),
-            "Cinema > Cinema internazionale" to arrayOf("cinema", "sky cinema", "paramount", "film", "movies", "movie", "premiere", "action", "thriller", "comedy"),
-            "Serie TV > Serie italiane" to arrayOf("serie italian", "fiction", "rai fiction"),
-            "Serie TV > Serie internazionali" to arrayOf("serie tv", "series", "tv series", "drama", "crime", "investigation", "fox", "hbo", "amc"),
-            "Documentari > Natura" to arrayOf("natura", "animal", "wild", "discovery", "national geographic", "nat geo", "wildlife"),
-            "Documentari > Storia e Scienza" to arrayOf("history", "storia", "science", "scienza", "focus", "documentar"),
-            "Bambini > Cartoni animati" to arrayOf("cartoon", "cartoni", "boing", "k2", "nick", "nickelodeon", "cartoonito", "disney junior"),
-            "Bambini > Ragazzi" to arrayOf("disney channel", "teen", "ragazzi", "kids", "baby tv"),
-            "News > Italiane" to arrayOf("tg", "rai news", "sky tg", "tgcom", "la7 news", "all news"),
-            "News > Internazionali" to arrayOf("bbc news", "cnn", "fox news", "al jazeera", "france 24", "dw news", "euronews"),
-            "Musica > Canali musicali" to arrayOf("music", "musica", "mtv", "radio", "concert"),
-            "Intrattenimento > Generalisti" to arrayOf("rai 1", "rai 2", "rai 3", "canale 5", "italia 1", "rete 4", "la7", "nove", "tv8", "real time", "dmax"),
-            "Intrattenimento > Reality e Show" to arrayOf("reality", "show", "talent", "masterchef", "amici", "gf", "grande fratello", "x factor", "talk")
-        )
-        for ((path, terms) in rules) if (has(*terms)) return path
-
-        val knownPath = normalizeCategoryPath(channel.category)
-        if (knownPath.contains(" > ")) return knownPath
-        return when {
-            has("intrattenimento", "entertainment") -> "Intrattenimento > Altri programmi"
-            has("xxx", "adult") -> "XXX > Adult"
-            else -> "Da classificare"
-        }
-    }
+    // Un'unica classificazione semantica per URL, file locali e playlist salvate.
+    // Evita che lo stesso canale finisca in cartelle diverse a seconda dell'import.
+    private fun inferCategoryPath(channel: TvChannel): String =
+        inferUrlCategoryPath(channel)
 
     private fun importUris(uris: List<Uri>) {
         if (uris.isEmpty()) return
@@ -1572,7 +1549,10 @@ class MainActivity : FragmentActivity() {
                                     } else {
                                         val savedManualPath = normalizeCategoryPath(channel.category)
                                         val inferred = inferCategoryPath(channel)
-                                        if (savedManualPath.contains(" > ") && savedManualPath in knownCategories) savedManualPath else inferred
+                                        val preserveManualPath = savedManualPath.isNotBlank() &&
+                                            !isAutomaticallyClassifiedUrlCategory(savedManualPath) &&
+                                            (savedManualPath in knownCategories || savedManualPath.contains(" > "))
+                                        if (preserveManualPath) savedManualPath else inferred
                                     }
                                     knownCategories.add(channel.category)
                                     val key = channel.name.lowercase(Locale.ROOT) + "|" + channel.url
@@ -1756,7 +1736,11 @@ class MainActivity : FragmentActivity() {
                             val mapping = runCatching { JSONObject(savedMappingJson) }.getOrDefault(JSONObject())
                             found.forEach { channel ->
                                 val savedCategory = normalizeCategoryPath(mapping.optString(channel.url))
-                                if (savedCategory.isNotBlank()) channel.category = savedCategory
+                                channel.category = when {
+                                    savedCategory.isBlank() -> inferUrlCategoryPath(channel)
+                                    isAutomaticallyClassifiedUrlCategory(savedCategory) -> inferUrlCategoryPath(channel)
+                                    else -> savedCategory // Le scelte manuali dell'utente hanno sempre la precedenza.
+                                }
                             }
                             runOnUiThread {
                                 if (isFinishing || isDestroyed) {
@@ -2039,9 +2023,9 @@ class MainActivity : FragmentActivity() {
             }
             val play = Button(this).apply {
                 tag = channel.name
-                text = if (isPlayingChannel) "▶  IN RIPRODUZIONE · ${channel.name}" else "▶  AVVIA CANALE · ${channel.name}"
+                text = channel.name
                 isAllCaps = false
-                textSize = 12f
+                textSize = 13f
                 maxLines = 2
                 ellipsize = android.text.TextUtils.TruncateAt.END
                 minWidth = 0
@@ -2049,18 +2033,18 @@ class MainActivity : FragmentActivity() {
                 setPadding(dp(5), 0, dp(5), 0)
                 setTextColor(if (isPlayingChannel) CYAN else Color.WHITE)
                 setBackgroundColor(Color.TRANSPARENT)
+                contentDescription = if (isPlayingChannel) "${channel.name}, in riproduzione" else "Riproduci ${channel.name}"
                 if (isPlayingChannel) playingChannelButton = this
                 setOnClickListener { playChannel(index, this) }
             }
             row.addView(play, LinearLayout.LayoutParams(0, dp(48), 1f))
-            val categoryButton = buttonView(channel.category.substringAfterLast(" > ")) { showCategoryPicker(channel) }.apply {
-                textSize = 10f
-                maxWidth = dp(112)
-                minWidth = 0
-                contentDescription = "Categoria: ${channel.category}. Tocca per modificarla."
-                setPadding(dp(7), 0, dp(7), 0)
+            val editButton = buttonView("✎") { showCategoryPicker(channel) }.apply {
+                textSize = 19f
+                minWidth = dp(42)
+                contentDescription = "Modifica categoria o sposta ${channel.name}"
+                setPadding(dp(8), 0, dp(8), 0)
             }
-            row.addView(categoryButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)))
+            row.addView(editButton, LinearLayout.LayoutParams(dp(44), dp(40)))
             target.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                 bottomMargin = dp(5)
             })
