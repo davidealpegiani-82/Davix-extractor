@@ -507,7 +507,7 @@ class MainActivity : FragmentActivity() {
             useController = true
             setShowBuffering(PlayerView.SHOW_BUFFERING_ALWAYS)
             setBackgroundColor(Color.BLACK)
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(176))
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(if (resources.configuration.smallestScreenWidthDp < 600) 128 else 176))
         }
         playerDock.addView(playerView)
         playbackInfo = TextView(this).apply {
@@ -2041,15 +2041,26 @@ class MainActivity : FragmentActivity() {
                 tag = channel.name
                 text = if (isPlayingChannel) "▶  IN RIPRODUZIONE · ${channel.name}" else "▶  AVVIA CANALE · ${channel.name}"
                 isAllCaps = false
-                textSize = 13f
+                textSize = 12f
+                maxLines = 2
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                minWidth = 0
                 gravity = Gravity.CENTER_VERTICAL or Gravity.START
+                setPadding(dp(5), 0, dp(5), 0)
                 setTextColor(if (isPlayingChannel) CYAN else Color.WHITE)
                 setBackgroundColor(Color.TRANSPARENT)
                 if (isPlayingChannel) playingChannelButton = this
                 setOnClickListener { playChannel(index, this) }
             }
             row.addView(play, LinearLayout.LayoutParams(0, dp(48), 1f))
-            row.addView(buttonView(channel.category) { showCategoryPicker(channel) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(42)))
+            val categoryButton = buttonView(channel.category.substringAfterLast(" > ")) { showCategoryPicker(channel) }.apply {
+                textSize = 10f
+                maxWidth = dp(112)
+                minWidth = 0
+                contentDescription = "Categoria: ${channel.category}. Tocca per modificarla."
+                setPadding(dp(7), 0, dp(7), 0)
+            }
+            row.addView(categoryButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(38)))
             target.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                 bottomMargin = dp(5)
             })
@@ -2079,10 +2090,11 @@ class MainActivity : FragmentActivity() {
                 val key = "$prefix:${node.path}"
                 val expanded = key in expandedCategoryPaths
                 val total = node.totalCount
+                // Header a due righe: su smartphone il nome non deve competere
+                // con i comandi di selezione, altrimenti viene compresso lettera per lettera.
                 val header = LinearLayout(this).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                    setPadding(dp(12 + depth * 16), dp(10), dp(10), dp(10))
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(10 + depth * 10), dp(8), dp(10), dp(8))
                     setBackgroundColor(if (depth == 0) 0xFF1B2A40.toInt() else 0xFF162235.toInt())
                     isClickable = true
                     isFocusable = true
@@ -2092,58 +2104,84 @@ class MainActivity : FragmentActivity() {
                         renderChannels()
                     }
                 }
-                header.addView(TextView(this).apply {
+                val titleRow = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                }
+                titleRow.addView(TextView(this).apply {
                     text = if (expanded) "📂" else "📁"
-                    textSize = 16f
-                })
-                header.addView(TextView(this).apply {
+                    textSize = 18f
+                    gravity = Gravity.CENTER
+                }, LinearLayout.LayoutParams(dp(28), dp(36)))
+                titleRow.addView(TextView(this).apply {
                     text = node.name
-                    textSize = if (depth == 0) 14f else 13f
+                    textSize = if (depth == 0) 15f else 14f
                     setTextColor(Color.WHITE)
                     setTypeface(null, android.graphics.Typeface.BOLD)
-                    setPadding(dp(9), 0, 0, 0)
-                }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-                header.addView(TextView(this).apply {
-                    text = "${if (expanded) "⌃  TOCCA PER CHIUDERE" else "⌄  TOCCA PER APRIRE"}  ·  $total"
-                    textSize = 10f
+                    maxLines = 1
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                    setPadding(dp(5), 0, dp(5), 0)
+                }, LinearLayout.LayoutParams(0, dp(36), 1f))
+                titleRow.addView(TextView(this).apply {
+                    text = total.toString()
+                    textSize = 12f
                     setTypeface(null, android.graphics.Typeface.BOLD)
                     setTextColor(CYAN)
+                    gravity = Gravity.CENTER
+                    setPadding(dp(7), 0, dp(5), 0)
                 })
-                run {
-                    val folderIndices = bulkIndicesByPath[node.path].orEmpty()
-                    val selectedInFolder = selectedCountsByPath[node.path] ?: 0
-                    val allFolderSelected = folderIndices.isNotEmpty() && selectedInFolder == folderIndices.size
-                    val folderSelectionLabel = when {
-                        allFolderSelected -> "☑  Deseleziona"
-                        selectedInFolder > 0 -> "◩  Completa selezione"
-                        else -> "□  Seleziona"
-                    }
-                    header.addView(buttonView(folderSelectionLabel) {
-                        val selectFolder = !allFolderSelected
-                        folderIndices.forEach { index -> channels.getOrNull(index)?.selected = selectFolder }
-                        persistChannelLibrary()
-                        renderChannels()
-                    }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(36)).apply {
-                        leftMargin = dp(8)
-                    })
+                titleRow.addView(TextView(this).apply {
+                    // Chevron down = apri; chevron up = chiudi.
+                    text = if (expanded) "⌃" else "⌄"
+                    textSize = 22f
+                    setTextColor(CYAN)
+                    gravity = Gravity.CENTER
+                    contentDescription = if (expanded) "Chiudi cartella" else "Apri cartella"
+                }, LinearLayout.LayoutParams(dp(30), dp(36)))
+                header.addView(titleRow, LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(36)
+                ))
+                val actionRow = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.END or Gravity.CENTER_VERTICAL
+                    setPadding(0, dp(5), 0, 0)
                 }
+                val folderIndices = bulkIndicesByPath[node.path].orEmpty()
+                val selectedInFolder = selectedCountsByPath[node.path] ?: 0
+                val allFolderSelected = folderIndices.isNotEmpty() && selectedInFolder == folderIndices.size
+                val folderSelectionLabel = when {
+                    allFolderSelected -> "☑  Deseleziona"
+                    selectedInFolder > 0 -> "◩  Completa selezione"
+                    else -> "□  Seleziona"
+                }
+                val selectionButton = buttonView(folderSelectionLabel) {
+                    val selectFolder = !allFolderSelected
+                    folderIndices.forEach { index -> channels.getOrNull(index)?.selected = selectFolder }
+                    persistChannelLibrary()
+                    renderChannels()
+                }
+                selectionButton.textSize = 12f
+                actionRow.addView(selectionButton, LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, dp(34)
+                ))
                 if (bulkSelectionMode) {
-                    val folderIndices = bulkIndicesByPath[node.path].orEmpty()
-                    val allFolderSelected = folderIndices.isNotEmpty() &&
+                    val allBulkSelected = folderIndices.isNotEmpty() &&
                         folderIndices.all { it in bulkSelectedIndices }
-                    header.addView(buttonView(
-                        if (allFolderSelected) "Deseleziona" else "Seleziona"
+                    val bulkButton = buttonView(
+                        if (allBulkSelected) "☑  Deseleziona spostamento" else "□  Seleziona per spostare"
                     ) {
-                        if (allFolderSelected) {
-                            bulkSelectedIndices.removeAll(folderIndices.toSet())
-                        } else {
-                            bulkSelectedIndices.addAll(folderIndices)
-                        }
+                        if (allBulkSelected) bulkSelectedIndices.removeAll(folderIndices.toSet())
+                        else bulkSelectedIndices.addAll(folderIndices)
                         renderChannels()
-                    }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(36)).apply {
-                        leftMargin = dp(8)
-                    })
+                    }
+                    bulkButton.textSize = 11f
+                    actionRow.addView(bulkButton, LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, dp(34)
+                    ).apply { leftMargin = dp(6) })
                 }
+                header.addView(actionRow, LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+                ))
                 target.addView(header, LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
                 ).apply {
