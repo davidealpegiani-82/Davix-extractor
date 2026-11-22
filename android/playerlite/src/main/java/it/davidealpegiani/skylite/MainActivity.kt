@@ -697,7 +697,8 @@ class MainActivity : Activity() {
             setTextColor(Color.rgb(226, 241, 252))
             textSize = if (isTvDevice()) 14f else 13f
             setTypeface(null, android.graphics.Typeface.BOLD)
-            letterSpacing = 0.035f            gravity = Gravity.CENTER_VERTICAL
+            letterSpacing = 0.035f
+            gravity = Gravity.CENTER_VERTICAL
             minHeight = dp(if (isTvDevice()) 66 else 54)
             setPadding(dp(16), dp(10), dp(14), dp(10))
             isFocusable = true
@@ -804,9 +805,8 @@ class MainActivity : Activity() {
                         .trim().replace(Regex("\\s+"), " ")
                     "name:$normalized"
                 }
-            // La categoria è un attributo editoriale, non l'identità del canale:
-            // varianti con group-title diversi devono comunque convergere se il
-            // tvg-id coincide o il nome normalizzato identifica lo stesso servizio.
+            // Category is editorial metadata, not channel identity. Variants
+            // remain grouped even when providers assign different group-title values.
             val key = "$mediaKind|$identity"
             buckets.getOrPut(key) { mutableListOf() }.add(channel)
         }
@@ -1400,6 +1400,7 @@ class MainActivity : Activity() {
             }
         }
     }
+
     override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
         if (isTvDevice() && event.action == android.view.KeyEvent.ACTION_DOWN) {
             if (!isFullscreen && event.keyCode in setOf(
