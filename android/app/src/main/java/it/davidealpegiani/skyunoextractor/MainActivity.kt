@@ -697,8 +697,7 @@ class MainActivity : FragmentActivity() {
             toast("Configura prima l'URL della playlist M3U.")
             showIptvSourceSettings()
             return
-        }
-        importInProgress = true
+        }        importInProgress = true
         status.text = "Download playlist IPTV in corso…"
         updateImportProgress("Connessione alla sorgente IPTV…", null)
         Thread({
@@ -1397,8 +1396,7 @@ class MainActivity : FragmentActivity() {
         // la presenza di prove episodiche o di un percorso VOD deve prevalere.
         val isVod = strongVod || (liveStreamExtension && (seriesEvidence || movieEvidence))
         if (isVod) {
-            val isSeries = seriesEvidence && !moviePath
-            val genre = if (isSeries) {
+            val isSeries = seriesEvidence && !moviePath            val genre = if (isSeries) {
                 when {
                     has("crime", "poliziesco", "investig", "detective", "gangster", "thriller") -> "Crime e Thriller"
                     has("commedia", "comedy", "sitcom", "comico") -> "Commedia"
@@ -1428,17 +1426,28 @@ class MainActivity : FragmentActivity() {
 
         // Un'etichetta live è considerata valida solo in assenza di segnali VOD.
         // L'estensione .m3u8/.ts da sola non basta: alcuni provider la usano per VOD.
+        // Tassonomia editoriale: i brand Sky e delle piattaforme sono riconosciuti
+        // prima delle etichette generiche inserite dai provider nelle playlist.
         val liveCategory = when {
             has("xxx", "adult", "adulti", "erotic") -> "Adult"
-            has("calcio", "football", "soccer", "serie a", "serie b", "champions league", "europa league", "conference league", "premier league", "bundesliga", "ligue 1", "coppa italia") -> "Sport > Calcio"
-            has("sport", "dazn", "eurosport", "sky sport", "sportitalia", "formula 1", "formula1", "motogp", "moto gp", "superbike", "wrc", "rally", "nascar", "motori", "tennis", "atp", "wta", "basket", "basketball", "nba", "euroleague", "golf", "rugby", "volley", "pallavolo", "ciclismo", "olimpiadi") -> "Sport > Altri sport"
-            has("news", "notizie", "rai news", "sky tg", "tgcom", "bbc", "cnn", "al jazeera", "france 24", "euronews") -> "News"
-            has("documentar", "discovery", "national geographic", "nat geo", "history channel", "wildlife", "natura", "focus") -> "Documentari"
-            has("cartoon", "cartoni", "boing", "k2", "nickelodeon", "cartoonito", "disney junior", "kids", "bambini") -> "Bambini"
-            has("music", "musica", "mtv", "concert", "radio") -> "Musica"
+            has("sky cinema", "sky primafila", "cinema collection", "cinema stories", "cinema family", "cinema action", "cinema suspense", "cinema comedy", "cinema romance", "cinema drama", "paramount network", "film channel", "movie channel") -> "Cinema"
+            has("sky sport", "dazn", "eurosport", "sportitalia", "sport tv", "espn", "bein sports", "calcio", "football", "soccer", "serie a", "serie b", "champions league", "europa league", "conference league", "premier league", "bundesliga", "ligue 1", "coppa italia", "formula 1", "formula1", "motogp", "moto gp", "superbike", "wrc", "rally", "nascar", "motori", "tennis", "atp", "wta", "basket", "basketball", "nba", "euroleague", "golf", "rugby", "volley", "pallavolo", "ciclismo", "olimpiadi") -> {
+                when {
+                    has("calcio", "football", "soccer", "serie a", "serie b", "champions league", "europa league", "conference league", "premier league", "bundesliga", "ligue 1", "coppa italia") -> "Sport > Calcio"
+                    has("formula 1", "formula1", "motogp", "moto gp", "superbike", "wrc", "rally", "nascar", "motori") -> "Sport > Motori"
+                    has("tennis", "atp", "wta") -> "Sport > Tennis"
+                    has("basket", "basketball", "nba", "euroleague") -> "Sport > Basket"
+                    else -> "Sport > Altri sport"
+                }
+            }
+            has("news", "notizie", "rai news", "sky tg", "tgcom", "bbc", "cnn", "al jazeera", "france 24", "euronews", "sky news") -> "News"
+            has("documentar", "discovery", "national geographic", "nat geo", "history channel", "history", "wildlife", "natura", "focus", "sky documentaries", "sky nature") -> "Documentari"
+            has("cartoon", "cartoni", "boing", "k2", "nickelodeon", "cartoonito", "disney junior", "kids", "bambini", "baby tv") -> "Bambini"
+            has("music", "musica", "mtv", "concert", "radio", "vevo") -> "Musica"
             has("regional", "regionale", "local tv", "telelombardia", "telecity", "telenova") -> "Regionali"
-            has("rai 1", "rai 2", "rai 3", "canale 5", "italia 1", "rete 4", "la7", "nove", "tv8", "real time", "dmax", "general", "entertainment", "intrattenimento", "reality", "masterchef", "x factor") -> "Intrattenimento"
-            has("cinema", "sky cinema", "paramount", "film channel", "movie channel") -> "Cinema"
+            // Sky Uno è intrattenimento; Sky Sport Uno viene intercettato prima
+            // dalla regola Sport e non può finire nella cartella sbagliata.
+            has("sky uno", "sky atlantic", "sky serie", "sky investigation", "sky crime", "sky arte", "sky reality", "sky family", "sky show", "sky witness", "sky living", "sky comedy", "sky max", "sky showcase", "sky replay", "rai 1", "rai 2", "rai 3", "canale 5", "italia 1", "rete 4", "la7", "nove", "tv8", "real time", "dmax", "general", "entertainment", "intrattenimento", "reality", "masterchef", "x factor") -> "Intrattenimento"
             has("international", "internazional", "world", "estero", "foreign") -> "Internazionali"
             else -> "Altri canali"
         }
@@ -2097,8 +2106,7 @@ class MainActivity : FragmentActivity() {
                     textSize = 18f
                     gravity = Gravity.CENTER
                 }, LinearLayout.LayoutParams(dp(28), dp(36)))
-                titleRow.addView(TextView(this).apply {
-                    text = node.name
+                titleRow.addView(TextView(this).apply {                    text = node.name
                     textSize = if (depth == 0) 15f else 14f
                     setTextColor(Color.WHITE)
                     setTypeface(null, android.graphics.Typeface.BOLD)
