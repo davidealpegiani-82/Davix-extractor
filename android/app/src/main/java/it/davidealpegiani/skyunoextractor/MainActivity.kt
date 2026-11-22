@@ -687,6 +687,10 @@ class MainActivity : FragmentActivity() {
             .setPositiveButton("Salva in modo protetto", null)
             .create().also { dialog ->
                 dialog.setOnShowListener {
+                    dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                        dialog.dismiss()
+                        openMandraKodiSettingsPicker()
+                    }
                     dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                         try {
                             IptvSourceSettings.save(
