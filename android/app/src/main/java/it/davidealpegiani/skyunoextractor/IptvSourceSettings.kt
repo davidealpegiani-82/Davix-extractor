@@ -18,10 +18,40 @@ internal object IptvSourceSettings {
     private const val PLAYLIST = "playlist_url"
     private const val EPG = "epg_url"
     private const val MANDRAKODI = "mandrakodi_catalog_url"
+    private const val MANDRAKODI_PASSWORD = "mandrakodi_password"
+    private const val MANDRAKODI_DEVICE_ID = "mandrakodi_device_id"
+    private const val MANDRAKODI_ADDON_VERSION = "1.3.3"
 
     fun playlistUrl(context: Context): String = read(context, PLAYLIST).orEmpty()
     fun epgUrl(context: Context): String = read(context, EPG).orEmpty()
     fun mandraKodiUrl(context: Context): String = read(context, MANDRAKODI).orEmpty()
+    fun mandraKodiPassword(context: Context): String = read(context, MANDRAKODI_PASSWORD).orEmpty()
+    fun mandraKodiDeviceId(context: Context): String = read(context, MANDRAKODI_DEVICE_ID).orEmpty()
+
+    /** Imports only the MandraKodi values needed for its documented HTTP User-Agent. */
+    fun saveMandraKodiCredentials(context: Context, password: String, deviceId: String) {
+        val cleanPassword = password.trim()
+        val cleanDeviceId = deviceId.trim().uppercase()
+        require(cleanPassword.isNotBlank() && cleanPassword.length <= 512) {
+            "Nel file Kodi non è stata trovata una password MandraKodi valida."
+        }
+        require(cleanDeviceId.matches(Regex("[A-Z0-9]{6}"))) {
+            "L'identificativo MandraKodi deve contenere 6 caratteri."
+        }
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(MANDRAKODI_PASSWORD, encrypt(cleanPassword))
+            .putString(MANDRAKODI_DEVICE_ID, encrypt(cleanDeviceId))
+            .apply()
+    }
+
+    fun mandraKodiUserAgent(context: Context): String {
+        val password = mandraKodiPassword(context)
+        val deviceId = mandraKodiDeviceId(context)
+        require(password.isNotBlank() && deviceId.matches(Regex("[A-Z0-9]{6}"))) {
+            "Importa prima le impostazioni MandraKodi da Kodi."
+        }
+        return "MandraKodi2@@$MANDRAKODI_ADDON_VERSION@@$password@@$deviceId"
+    }
 
     fun save(context: Context, playlistUrl: String, epgUrl: String, mandraKodiCatalogUrl: String = mandraKodiUrl(context)) {
         val playlist = validate(playlistUrl, "M3U")

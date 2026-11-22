@@ -11,6 +11,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.util.Xml
 import android.util.AtomicFile
 import android.view.Gravity
 import android.view.View
@@ -51,12 +52,15 @@ import androidx.media3.exoplayer.source.MediaLoadData
 import androidx.media3.ui.PlayerView
 import org.json.JSONArray
 import org.json.JSONObject
+import org.xmlpull.v1.XmlPullParser
 import java.io.BufferedReader
 import java.io.ByteArrayOutputStream
+import java.io.ByteArrayInputStream
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.StandardCharsets
+import java.security.SecureRandom
 import java.util.Locale
 import java.util.concurrent.Executors
 
@@ -160,6 +164,7 @@ class MainActivity : FragmentActivity() {
     companion object {
         private const val PICK_FILE = 4101
         private const val SAVE_HTML = 4102
+        private const val PICK_MANDRAKODI_SETTINGS = 4103
         private const val CYAN = 0xFF39D7FF.toInt()
         private const val BG = 0xFF080B12.toInt()
         private const val PANEL = 0xFF121A29.toInt()
@@ -678,9 +683,14 @@ class MainActivity : FragmentActivity() {
             .setTitle("Sorgenti IPTV / EPG")
             .setView(content)
             .setNegativeButton("Annulla", null)
+            .setNeutralButton("Importa settings Kodi", null)
             .setPositiveButton("Salva in modo protetto", null)
             .create().also { dialog ->
                 dialog.setOnShowListener {
+                    dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                        dialog.dismiss()
+                        openMandraKodiSettingsPicker()
+                    }
                     dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                         try {
                             IptvSourceSettings.save(
@@ -698,6 +708,65 @@ class MainActivity : FragmentActivity() {
                 }
                 dialog.show()
             }
+    }
+
+    private fun openMandraKodiSettingsPicker() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "text/xml"
+            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("text/xml", "application/xml", "text/plain", "*/*"))
+        }
+        startActivityForResult(intent, PICK_MANDRAKODI_SETTINGS)
+    }
+
+    private fun importMandraKodiSettings(uri: Uri) {
+        try {
+            val bytes = contentResolver.openInputStream(uri)?.use { input ->
+                val output = ByteArrayOutputStream()
+                val buffer = ByteArray(8 * 1024)
+                var total = 0
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    total += count
+                    require(total <= 1024 * 1024) { "Il file settings.xml supera il limite di 1 MiB." }
+                    output.write(buffer, 0, count)
+                }
+                output.toByteArray()
+            } ?: throw IOException("Impossibile leggere il file selezionato.")
+
+            val parser = Xml.newPullParser()
+            parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
+            parser.setInput(ByteArrayInputStream(bytes), "UTF-8")
+            var password = ""
+            var deviceId = ""
+            var event = parser.eventType
+            while (event != XmlPullParser.END_DOCUMENT) {
+                if (event == XmlPullParser.START_TAG && parser.name.equals("setting", true)) {
+                    val id = parser.getAttributeValue(null, "id").orEmpty()
+                    val attributeValue = parser.getAttributeValue(null, "value")
+                    val value = attributeValue ?: runCatching { parser.nextText() }.getOrDefault("")
+                    when (id) {
+                        "password" -> password = value.trim()
+                        "urlAppo2" -> deviceId = value.trim()
+                    }
+                }
+                event = parser.next()
+            }
+            require(password.isNotBlank() && password != "MandraKodi3") {
+                "Password non trovata. Seleziona settings.xml di plugin.video.mandrakodi."
+            }
+            if (!deviceId.matches(Regex("[A-Za-z0-9]{6}"))) {
+                val chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+                val random = SecureRandom()
+                deviceId = (1..6).map { chars[random.nextInt(chars.length)] }.joinToString("")
+            }
+            IptvSourceSettings.saveMandraKodiCredentials(this, password, deviceId)
+            toast("Impostazioni MandraKodi importate e cifrate sul dispositivo.")
+            status.text = "Credenziali MandraKodi importate · pronto per verificare l'accesso al catalogo."
+        } catch (e: Exception) {
+            toast(e.message ?: "Importazione impostazioni MandraKodi non riuscita.")
+        }
     }
 
     private fun importMandraKodiCatalog() {
@@ -1229,6 +1298,9 @@ class MainActivity : FragmentActivity() {
                 data.clipData?.let { clip -> for (i in 0 until clip.itemCount) uris.add(clip.getItemAt(i).uri) }
                 data.data?.let { if (uris.isEmpty()) uris.add(it) }
                 importUris(uris)
+            }
+            PICK_MANDRAKODI_SETTINGS -> {
+                data.data?.let { uri -> importMandraKodiSettings(uri) }
             }
             SAVE_HTML -> {
                 data.data?.let { uri ->
