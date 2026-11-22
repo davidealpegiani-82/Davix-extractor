@@ -805,7 +805,9 @@ class MainActivity : Activity() {
                         .trim().replace(Regex("\\s+"), " ")
                     "name:$normalized"
                 }
-            val key = "$mediaKind|$category|$identity"
+            // Category is editorial metadata, not channel identity. Variants
+            // remain grouped even when providers assign different group-title values.
+            val key = "$mediaKind|$identity"
             buckets.getOrPut(key) { mutableListOf() }.add(channel)
         }
         return buckets.map { (key, sources) ->
