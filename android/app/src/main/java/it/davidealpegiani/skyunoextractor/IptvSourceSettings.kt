@@ -17,17 +17,21 @@ internal object IptvSourceSettings {
     private const val KEY_ALIAS = "davix_iptv_sources_aes_v1"
     private const val PLAYLIST = "playlist_url"
     private const val EPG = "epg_url"
+    private const val MANDRAKODI = "mandrakodi_catalog_url"
 
     fun playlistUrl(context: Context): String = read(context, PLAYLIST).orEmpty()
     fun epgUrl(context: Context): String = read(context, EPG).orEmpty()
+    fun mandraKodiUrl(context: Context): String = read(context, MANDRAKODI).orEmpty()
 
-    fun save(context: Context, playlistUrl: String, epgUrl: String) {
+    fun save(context: Context, playlistUrl: String, epgUrl: String, mandraKodiCatalogUrl: String = mandraKodiUrl(context)) {
         val playlist = validate(playlistUrl, "M3U")
         val epg = validate(epgUrl, "XMLTV")
+        val mandraKodi = validate(mandraKodiCatalogUrl, "catalogo MandraKodi")
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         prefs.edit()
             .putString(PLAYLIST, playlist.takeIf { it.isNotBlank() }?.let(::encrypt))
             .putString(EPG, epg.takeIf { it.isNotBlank() }?.let(::encrypt))
+            .putString(MANDRAKODI, mandraKodi.takeIf { it.isNotBlank() }?.let(::encrypt))
             .apply()
     }
 
