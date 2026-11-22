@@ -23,10 +23,10 @@ internal object IptvSourceSettings {
     fun epgUrl(context: Context): String = read(context, EPG).orEmpty()
     fun mandraKodiUrl(context: Context): String = read(context, MANDRAKODI).orEmpty()
 
-    fun save(context: Context, playlistUrl: String, epgUrl: String, mandraKodiUrl: String = mandraKodiUrl(context)) {
+    fun save(context: Context, playlistUrl: String, epgUrl: String, mandraKodiCatalogUrl: String = mandraKodiUrl(context)) {
         val playlist = validate(playlistUrl, "M3U")
         val epg = validate(epgUrl, "XMLTV")
-        val mandraKodi = validate(mandraKodiUrl, "catalogo MandraKodi")
+        val mandraKodi = validate(mandraKodiCatalogUrl, "catalogo MandraKodi")
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         prefs.edit()
             .putString(PLAYLIST, playlist.takeIf { it.isNotBlank() }?.let(::encrypt))
