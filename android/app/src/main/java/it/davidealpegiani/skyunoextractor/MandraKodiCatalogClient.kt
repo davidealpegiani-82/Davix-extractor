@@ -46,48 +46,55 @@ internal class MandraKodiCatalogClient(
     fun loadRoot(): MandraKodiCatalogPage = load(ROOT_URL)
 
     fun load(url: String): MandraKodiCatalogPage {
-        val safeUrl = resolveSafeUrl(url, ROOT_URL)
-            ?: throw IllegalArgumentException("Indirizzo catalogo MandraKodi non valido o locale.")
-        val connection = URL(safeUrl).openConnection() as HttpURLConnection
-        try {
-            connection.requestMethod = "GET"
-            connection.connectTimeout = connectTimeoutMs
-            connection.readTimeout = readTimeoutMs
-            connection.instanceFollowRedirects = true
-            connection.setRequestProperty("Accept", "application/json, application/x-mpegURL, audio/x-mpegurl, text/plain, */*")
-            connection.setRequestProperty("Accept-Encoding", "identity")
-            connection.setRequestProperty("User-Agent", userAgent)
-            val code = connection.responseCode
-            val finalUrl = connection.url.toString()
-            if (resolveSafeUrl(finalUrl, safeUrl) == null) {
-                throw IOException("La sorgente MandraKodi ha reindirizzato a un indirizzo non consentito.")
-            }
-            if (code !in 200..299) {
-                throw IOException("MandraKodi non ha risposto correttamente (HTTP $code). Controlla credenziali e versione add-on.")
-            }
-            val output = ByteArrayOutputStream()
-            connection.inputStream.use { input ->
-                val buffer = ByteArray(8192)
-                var total = 0
-                while (true) {
-                    val count = input.read(buffer)
-                    if (count < 0) break
-                    total += count
-                    if (total > maxResponseBytes) throw IOException("La risposta MandraKodi supera il limite di 12 MiB.")
-                    output.write(buffer, 0, count)
+        var currentUrl = resolveSafeMenuUrl(url, ROOT_URL)
+            ?: throw IllegalArgumentException("I menu MandraKodi devono essere raggiunti tramite HTTPS.")
+        var redirects = 0
+        while (true) {
+            val connection = URL(currentUrl).openConnection() as HttpURLConnection
+            try {
+                connection.requestMethod = "GET"
+                connection.connectTimeout = connectTimeoutMs
+                connection.readTimeout = readTimeoutMs
+                connection.instanceFollowRedirects = false
+                connection.setRequestProperty("Accept", "application/json, application/x-mpegURL, audio/x-mpegurl, text/plain, */*")
+                connection.setRequestProperty("Accept-Encoding", "identity")
+                connection.setRequestProperty("User-Agent", userAgent)
+                val code = connection.responseCode
+                if (code in 300..399) {
+                    if (redirects++ >= 5) throw IOException("Troppi reindirizzamenti del catalogo MandraKodi.")
+                    val location = connection.getHeaderField("Location")
+                        ?: throw IOException("Reindirizzamento MandraKodi senza destinazione.")
+                    currentUrl = resolveSafeMenuUrl(location, currentUrl)
+                        ?: throw IOException("Reindirizzamento MandraKodi non HTTPS o verso un indirizzo locale: bloccato.")
+                    continue
                 }
+                if (code !in 200..299) {
+                    throw IOException("MandraKodi non ha risposto correttamente (HTTP $code). Controlla credenziali e versione add-on.")
+                }
+                val output = ByteArrayOutputStream()
+                connection.inputStream.use { input ->
+                    val buffer = ByteArray(8192)
+                    var total = 0
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        total += count
+                        if (total > maxResponseBytes) throw IOException("La risposta MandraKodi supera il limite di 12 MiB.")
+                        output.write(buffer, 0, count)
+                    }
+                }
+                return parse(output.toString(Charsets.UTF_8.name()).removePrefix("\uFEFF"), currentUrl)
+            } finally {
+                connection.disconnect()
             }
-            return parse(output.toString(Charsets.UTF_8.name()).removePrefix("\uFEFF"), finalUrl)
-        } finally {
-            connection.disconnect()
         }
     }
 
     fun open(entry: MandraKodiCatalogEntry, baseUrl: String): MandraKodiCatalogPage {
         entry.inlineDocument?.let { return parse(it, baseUrl) }
         val target = entry.folderUrl ?: throw IllegalArgumentException("Voce MandraKodi non navigabile.")
-        return load(resolveSafeUrl(target, baseUrl)
-            ?: throw IllegalArgumentException("Collegamento MandraKodi non valido o locale."))
+        return load(resolveSafeMenuUrl(target, baseUrl)
+            ?: throw IllegalArgumentException("Il collegamento al menu MandraKodi deve usare HTTPS."))
     }
 
     fun parse(document: String, sourceUrl: String = ROOT_URL): MandraKodiCatalogPage {
@@ -101,7 +108,7 @@ internal class MandraKodiCatalogClient(
             val groups = root.optJSONArray("groups")
             val stationUrl = groups?.optJSONObject(0)?.optJSONArray("stations")
                 ?.optJSONObject(0)?.optString("url").orEmpty()
-            resolveSafeUrl(stationUrl, sourceUrl)?.let {
+            resolveSafeMenuUrl(stationUrl, sourceUrl)?.let {
                 return MandraKodiCatalogPage(root.optString("title").ifBlank { "MandraKodi" },
                     listOf(MandraKodiCatalogEntry("Apri catalogo", folderUrl = it)), sourceUrl)
             }
@@ -156,10 +163,10 @@ internal class MandraKodiCatalogClient(
         channel.optJSONArray("groups")?.let { nested.put("groups", it) }
         if (nested.length() > 0) return MandraKodiCatalogEntry(name, inlineDocument = nested.toString())
         val external = channel.optString("externallink").ifBlank { channel.optString("externallink2") }
-        resolveSafeUrl(external, baseUrl)?.let { return MandraKodiCatalogEntry(name, folderUrl = it) }
+        resolveSafeMenuUrl(external, baseUrl)?.let { return MandraKodiCatalogEntry(name, folderUrl = it) }
         val url = channel.optString("url").ifBlank { channel.optString("stream") }
         if (isDirectHttpUrl(url, baseUrl)) {
-            return if (isLikelyMenuUrl(url)) MandraKodiCatalogEntry(name, folderUrl = resolveSafeUrl(url, baseUrl))
+            return if (isLikelyMenuUrl(url)) resolveSafeMenuUrl(url, baseUrl)?.let { MandraKodiCatalogEntry(name, folderUrl = it) }
             else MandraKodiCatalogEntry(name, streamUrl = resolveSafeUrl(url, baseUrl), category = channel.optString("category"))
         }
         return null
@@ -173,10 +180,10 @@ internal class MandraKodiCatalogClient(
         if (title.isBlank()) return null
 
         val external = item.optString("externallink").ifBlank { item.optString("externallink2") }
-        resolveSafeUrl(external, baseUrl)?.let { return MandraKodiCatalogEntry(title, folderUrl = it) }
+        resolveSafeMenuUrl(external, baseUrl)?.let { return MandraKodiCatalogEntry(title, folderUrl = it) }
 
         val m3u = item.optString("m3u")
-        resolveSafeUrl(m3u, baseUrl)?.let { return MandraKodiCatalogEntry(title, folderUrl = it) }
+        resolveSafeMenuUrl(m3u, baseUrl)?.let { return MandraKodiCatalogEntry(title, folderUrl = it) }
 
         val nested = JSONObject()
         item.optJSONArray("items")?.let { nested.put("items", it) }
@@ -242,6 +249,9 @@ internal class MandraKodiCatalogClient(
         val path = runCatching { URL(value).path.lowercase(Locale.ROOT) }.getOrDefault("")
         return path.endsWith(".json") || path.endsWith(".m3u")
     }
+
+    private fun resolveSafeMenuUrl(value: String, baseUrl: String): String? =
+        resolveSafeUrl(value, baseUrl)?.takeIf { runCatching { URL(it).protocol.equals("https", true) }.getOrDefault(false) }
 
     private fun resolveSafeUrl(value: String, baseUrl: String): String? {
         val raw = value.trim()

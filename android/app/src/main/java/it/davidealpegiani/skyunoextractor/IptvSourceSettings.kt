@@ -44,7 +44,7 @@ internal object IptvSourceSettings {
     fun saveMandraKodiCredentials(context: Context, password: String, deviceId: String) {
         val cleanPassword = password.trim()
         val cleanDeviceId = deviceId.trim().uppercase()
-        require(cleanPassword.isNotBlank() && cleanPassword.length <= 512) {
+        require(cleanPassword.isNotBlank() && cleanPassword.length <= 512 && cleanPassword.all { it.code in 0x20..0x7E }) {
             "Nel file Kodi non è stata trovata una password MandraKodi valida."
         }
         require(cleanDeviceId.matches(Regex("[A-Z0-9]{6}"))) {

@@ -8,6 +8,8 @@ const settings = read("app/src/main/java/it/davidealpegiani/skyunoextractor/Iptv
 const activity = read("app/src/main/java/it/davidealpegiani/skyunoextractor/MainActivity.kt");
 
 assert(client.includes("data/disclaimer.json"), "MandraKodi root menu URL missing");
+assert(client.includes("connection.instanceFollowRedirects = false"), "Redirects must be checked before following them");
+assert(client.includes("resolveSafeMenuUrl"), "Authenticated menu navigation must require HTTPS");
 assert(client.includes('setRequestProperty("User-Agent", userAgent)'), "Authenticated User-Agent missing");
 assert(client.includes("MAX_ENTRIES = 1500"), "Menu entry limit missing");
 assert(client.includes("maxResponseBytes: Int = 12 * 1024 * 1024"), "Response size limit missing");
