@@ -21,7 +21,7 @@ internal object IptvSourceSettings {
     private const val MANDRAKODI_PASSWORD = "mandrakodi_password"
     private const val MANDRAKODI_DEVICE_ID = "mandrakodi_device_id"
     private const val MANDRAKODI_ADDON_VERSION = "mandrakodi_addon_version"
-    private const val DEFAULT_MANDRAKODI_ADDON_VERSION = "2.2.1.e"
+    private const val DEFAULT_MANDRAKODI_ADDON_VERSION = "2.2.1"
 
     fun playlistUrl(context: Context): String = read(context, PLAYLIST).orEmpty()
     fun epgUrl(context: Context): String = read(context, EPG).orEmpty()
