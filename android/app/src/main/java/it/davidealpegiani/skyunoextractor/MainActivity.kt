@@ -1272,16 +1272,15 @@ class MainActivity : FragmentActivity() {
         status.text = "Connessione alla sorgente Xtream…"
         updateImportProgress("Verifica account e preparazione catalogo…", null)
         Thread({
+            var temporaryCatalog: java.io.File? = null
             try {
                 val result = XtreamCatalogClient(source) { message ->
                     updateImportProgress(message, null)
                 }.downloadCatalog()
                 val bytes = result.m3u.toByteArray(StandardCharsets.UTF_8)
-                savePlaylistCopy("catalogo-xtream-automatico.m3u", bytes)
-                val importedFile = savedPlaylistDirectory().listFiles()
-                    ?.filter { it.isFile && it.name.endsWith("_catalogo-xtream-automatico.m3u") }
-                    ?.maxByOrNull { it.lastModified() }
-                    ?: throw IOException("Catalogo creato ma file temporaneo non trovato.")
+                val importedFile = java.io.File(cacheDir, "davix-xtream-${System.currentTimeMillis()}.m3u")
+                importedFile.writeBytes(bytes)
+                temporaryCatalog = importedFile
                 runOnUiThread {
                     if (isFinishing || isDestroyed) {
                         importInProgress = false
@@ -1289,9 +1288,10 @@ class MainActivity : FragmentActivity() {
                     }
                     importInProgress = false
                     status.text = "Catalogo Xtream recuperato · Live: ${result.liveCount} · Film: ${result.vodCount} · Episodi: ${result.episodeCount} · Serie non disponibili: ${result.skippedSeries}. Inserimento senza sovrascrivere l'archivio…"
-                    loadSavedPlaylist(importedFile)
+                    loadSavedPlaylist(importedFile, deleteAfterImport = true)
                 }
             } catch (error: Exception) {
+                temporaryCatalog?.delete()
                 runOnUiThread {
                     importInProgress = false
                     finishImportProgress()
@@ -2225,7 +2225,7 @@ class MainActivity : FragmentActivity() {
         }
     }
 
-    private fun loadSavedPlaylist(file: java.io.File) {
+    private fun loadSavedPlaylist(file: java.io.File, deleteAfterImport: Boolean = false) {
         if (importInProgress) { toast("È già in corso un'importazione."); return }
         if (!file.exists()) {
             toast("La playlist salvata non è più disponibile.")
@@ -2236,8 +2236,12 @@ class MainActivity : FragmentActivity() {
         updateImportProgress("Caricamento playlist salvata · lettura file…", null)
         Thread({
             try {
-                val found = parseChannels(file.readText(StandardCharsets.UTF_8)) { parsed ->
-                    updateImportProgress("Analisi playlist salvata · $parsed%", parsed)
+                val found = try {
+                    parseChannels(file.readText(StandardCharsets.UTF_8)) { parsed ->
+                        updateImportProgress("Analisi playlist salvata · $parsed%", parsed)
+                    }
+                } finally {
+                    if (deleteAfterImport) file.delete()
                 }
                 if (found.isEmpty()) {
                     runOnUiThread {
