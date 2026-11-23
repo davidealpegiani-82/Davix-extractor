@@ -133,12 +133,27 @@ internal class XtreamCatalogClient(
             val code = connection.responseCode
             if (code in 300..399) throw IOException("Il server Xtream ha richiesto un reindirizzamento non consentito.")
             if (code !in 200..299) {
+                val serverMessage = runCatching { connection.responseMessage }.getOrNull()
+                    ?.takeIf { it.isNotBlank() }
+                val contentType = connection.getHeaderField("Content-Type")
+                    ?.take(120)
+                val responseBody = readErrorBody(connection)
+                    .replace(source.username, "[UTENTE]")
+                    .replace(source.password, "[PASSWORD]")
+                    .take(600)
+                    .replace(Regex("\\s+"), " ")
+                val details = buildList {
+                    if (!serverMessage.isNullOrBlank()) add(serverMessage)
+                    if (!contentType.isNullOrBlank()) add("Content-Type: $contentType")
+                    if (responseBody.isNotBlank()) add("Risposta: $responseBody")
+                }.joinToString(" · ")
                 val message = when (code) {
                     401, 403 -> "Accesso Xtream negato (HTTP $code)."
                     429 -> "Troppe richieste al server Xtream (HTTP 429). Riprova più tardi."
+                    513 -> "Il server o un intermediario ha rifiutato la richiesta iniziale Xtream (HTTP 513)."
                     else -> "Errore del server Xtream (HTTP $code)."
                 }
-                throw IOException(message)
+                throw IOException(if (details.isBlank()) message else "$message $details")
             }
             val output = ByteArrayOutputStream()
             connection.inputStream.use { input ->
@@ -156,6 +171,24 @@ internal class XtreamCatalogClient(
         } finally {
             connection.disconnect()
         }
+    }
+
+    private fun readErrorBody(connection: HttpURLConnection): String {
+        val stream = runCatching { connection.errorStream }.getOrNull() ?: return ""
+        return runCatching {
+            stream.use { input ->
+                val output = ByteArrayOutputStream()
+                val buffer = ByteArray(2048)
+                var total = 0
+                while (total < 4096) {
+                    val read = input.read(buffer, 0, minOf(buffer.size, 4096 - total))
+                    if (read < 0) break
+                    output.write(buffer, 0, read)
+                    total += read
+                }
+                String(output.toByteArray(), StandardCharsets.UTF_8)
+            }
+        }.getOrDefault("")
     }
 
     private fun safeExtension(raw: String, fallback: String): String {
