@@ -48,7 +48,8 @@ internal object XtreamStreamScanner {
             if (code >= 500) return StreamCheckResult(StreamCheckState.SERVER_ERROR, "HTTP $code")
             if (probe.redirect != null) {
                 val target = initial.resolve(probe.redirect)
-                if (!target.host.equals(initial.host, true)) {
+                if (!target.scheme.equals("http", true) && !target.scheme.equals("https", true) ||
+                    target.host.isNullOrBlank() || !target.host.equals(initial.host, true) || target.port != initial.port) {
                     return StreamCheckResult(StreamCheckState.EXTERNAL_REDIRECT, "Redirect verso host differente")
                 }
                 val redirected = request(target.toURL())
@@ -64,7 +65,7 @@ internal object XtreamStreamScanner {
 
     fun cacheKey(url: String): String {
         val digest = MessageDigest.getInstance("SHA-256").digest(url.toByteArray(Charsets.UTF_8))
-        return digest.joinToString("") { "%02x".format(it) }
+        return digest.joinToString("") { "%02x".format(it.toInt() and 0xff) }
     }
 
     private fun classify(probe: Probe): StreamCheckResult {
