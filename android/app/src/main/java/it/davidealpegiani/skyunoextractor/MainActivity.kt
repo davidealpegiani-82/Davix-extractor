@@ -926,7 +926,7 @@ class MainActivity : FragmentActivity() {
                 val savedMapping = runCatching { JSONObject(savedMappingJson) }.getOrDefault(JSONObject())
                 val seen = existingKeys.toMutableSet()
                 val prepared = incoming.map { channel ->
-                    val saved = normalizeCategoryPath(savedMapping.optString(channel.url))
+                    val saved = normalizeCategoryPath(savedCategoryForUrl(savedMapping, channel.url))
                     val source = normalizeCategoryPath(channel.category)
                     val inferred = inferUrlCategoryPath(channel.copy(category = source))
                     val manual = saved.isNotBlank() && !isAutomaticallyClassifiedUrlCategory(saved)
@@ -1071,7 +1071,7 @@ class MainActivity : FragmentActivity() {
 
                             found.forEachIndexed { index, channel ->
                                 val sourceGroup = channel.category
-                                val savedCategory = normalizeCategoryPath(savedCategoryMapping.optString(channel.url))
+                                val savedCategory = normalizeCategoryPath(savedCategoryForUrl(savedCategoryMapping, channel.url))
                                 val inferred = inferUrlCategoryPath(channel.copy(category = sourceGroup))
                                 val savedPath = normalizeCategoryPath(savedCategory)
                                 val sourcePath = normalizeCategoryPath(sourceGroup)
@@ -2073,7 +2073,7 @@ class MainActivity : FragmentActivity() {
 
                             parsedFiles.forEach { fileChannels ->
                                 fileChannels.forEach { channel ->
-                                    val savedCategory = mapping.optString(channel.url)
+                                    val savedCategory = savedCategoryForUrl(mapping, channel.url)
                                     if (savedCategory.isNotBlank()) channel.category = normalizeCategoryPath(savedCategory)
                                     channel.category = if (destination != null) {
                                         destination
@@ -3033,6 +3033,12 @@ class MainActivity : FragmentActivity() {
         if ("Non classificati" !in categories) categories.add("Non classificati")
     }
 
+    private fun categoryMappingKey(url: String): String =
+        "urlsha256:" + XtreamStreamScanner.cacheKey(url)
+
+    private fun savedCategoryForUrl(mapping: JSONObject, url: String): String =
+        mapping.optString(categoryMappingKey(url)).ifBlank { mapping.optString(url) }
+
     private fun restoreChannelCategories(items: List<TvChannel>) {
         val mapping = runCatching { JSONObject(categoryPrefs.getString("channel_categories_json", "{}") ?: "{}") }.getOrNull() ?: return
         items.forEach { channel ->
@@ -3045,7 +3051,7 @@ class MainActivity : FragmentActivity() {
     private fun saveCategorySettings() {
         // Snapshot leggero sul main thread; JSON e aggiornamento preferenze sono serializzati sul writer.
         val categorySnapshot = categories.toList()
-        val channelCategorySnapshot = channels.map { it.url to it.category }
+        val channelCategorySnapshot = channels.map { categoryMappingKey(it.url) to it.category }
         runCatching {
             archiveExecutor.execute {
                 runCatching {
