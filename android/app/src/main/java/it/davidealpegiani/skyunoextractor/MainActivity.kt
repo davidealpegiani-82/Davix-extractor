@@ -2999,6 +2999,8 @@ class MainActivity : FragmentActivity() {
                     Log.i("DAVIX-ARCHIVE", "Ripristinati " + channels.size + " canali dall’archivio locale")
                     renderChannels()
                     renderSavedPlaylists()
+                    // Rewrites legacy URL-keyed category preferences using non-reversible URL fingerprints.
+                    saveCategorySettings()
                     // Migrazione una tantum: gli archivi precedenti partivano tutti selezionati.
                     // Dalla versione 2 in poi lo stato scelto dall'utente viene mantenuto.
                     if (legacySelectionReset || archiveNeedsEncryption) persistChannelLibrary()
