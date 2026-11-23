@@ -1277,6 +1277,9 @@ class MainActivity : FragmentActivity() {
                 val result = XtreamCatalogClient(source) { message ->
                     updateImportProgress(message, null)
                 }.downloadCatalog()
+                cacheDir.listFiles()
+                    ?.filter { it.isFile && it.name.startsWith("davix-xtream-") && it.name.endsWith(".m3u") }
+                    ?.forEach { it.delete() }
                 val bytes = result.m3u.toByteArray(StandardCharsets.UTF_8)
                 val importedFile = java.io.File(cacheDir, "davix-xtream-${System.currentTimeMillis()}.m3u")
                 importedFile.writeBytes(bytes)
