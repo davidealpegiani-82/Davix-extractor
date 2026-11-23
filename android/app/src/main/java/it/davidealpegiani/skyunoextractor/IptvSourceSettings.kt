@@ -22,6 +22,9 @@ internal object IptvSourceSettings {
     private const val MANDRAKODI_DEVICE_ID = "mandrakodi_device_id"
     private const val MANDRAKODI_ADDON_VERSION = "mandrakodi_addon_version"
     private const val DEFAULT_MANDRAKODI_ADDON_VERSION = "2.2.1"
+    private const val XTREAM_BASE = "xtream_base"
+    private const val XTREAM_USERNAME = "xtream_username"
+    private const val XTREAM_PASSWORD = "xtream_password"
 
     fun playlistUrl(context: Context): String = read(context, PLAYLIST).orEmpty()
     fun epgUrl(context: Context): String = read(context, EPG).orEmpty()
@@ -29,6 +32,24 @@ internal object IptvSourceSettings {
     fun mandraKodiPassword(context: Context): String = read(context, MANDRAKODI_PASSWORD).orEmpty()
     fun mandraKodiDeviceId(context: Context): String = read(context, MANDRAKODI_DEVICE_ID).orEmpty()
     fun mandraKodiAddonVersion(context: Context): String = read(context, MANDRAKODI_ADDON_VERSION).orEmpty().ifBlank { DEFAULT_MANDRAKODI_ADDON_VERSION }
+
+    fun saveXtreamSource(context: Context, source: XtreamReportSource) {
+        val base = validate(source.baseUrl, "server Xtream")
+        require(source.username.isNotBlank() && source.username.length <= 512)
+        require(source.password.isNotBlank() && source.password.length <= 512)
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(XTREAM_BASE, encrypt(base))
+            .putString(XTREAM_USERNAME, encrypt(source.username))
+            .putString(XTREAM_PASSWORD, encrypt(source.password))
+            .apply()
+    }
+
+    fun xtreamSource(context: Context): XtreamReportSource? {
+        val base = read(context, XTREAM_BASE)?.takeIf { it.isNotBlank() } ?: return null
+        val username = read(context, XTREAM_USERNAME)?.takeIf { it.isNotBlank() } ?: return null
+        val password = read(context, XTREAM_PASSWORD)?.takeIf { it.isNotBlank() } ?: return null
+        return XtreamReportSource(base, username, password, emptyList(), emptyList(), emptyList(), null)
+    }
 
     fun saveMandraKodiAddonVersion(context: Context, version: String) {
         val clean = version.trim()
