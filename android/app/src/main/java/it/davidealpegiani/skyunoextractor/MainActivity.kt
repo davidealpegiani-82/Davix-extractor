@@ -1327,7 +1327,7 @@ class MainActivity : FragmentActivity() {
             dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener { button ->
                 streamScanCancelled = true
                 button.isEnabled = false
-                button.text = "Interruzione…"
+                dialog.getButton(AlertDialog.BUTTON_NEGATIVE).text = "Interruzione…"
             }
         }
         dialog.show()
