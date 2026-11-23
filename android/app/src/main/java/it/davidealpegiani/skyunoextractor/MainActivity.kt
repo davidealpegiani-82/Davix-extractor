@@ -1336,6 +1336,8 @@ class MainActivity : FragmentActivity() {
             val counts = mutableMapOf<StreamCheckState, Int>()
             val unavailable = ArrayList<String>()
             val prefs = getSharedPreferences("davix_stream_scan_v1", MODE_PRIVATE)
+            val pendingCache = LinkedHashMap<String, String>()
+            var problemCount = 0
             var checked = 0
             for (index in snapshot.indices) {
                 if (streamScanCancelled) break
@@ -1343,16 +1345,23 @@ class MainActivity : FragmentActivity() {
                 val result = XtreamStreamScanner.check(channel.url)
                 counts[result.state] = (counts[result.state] ?: 0) + 1
                 val cacheValue = result.state.name + "|" + System.currentTimeMillis()
-                prefs.edit().putString(XtreamStreamScanner.cacheKey(channel.url), cacheValue).apply()
+                pendingCache[XtreamStreamScanner.cacheKey(channel.url)] = cacheValue
+                if (pendingCache.size >= 50) {
+                    val editor = prefs.edit()
+                    pendingCache.forEach { (key, value) -> editor.putString(key, value) }
+                    editor.apply()
+                    pendingCache.clear()
+                }
                 if (result.state != StreamCheckState.REACHABLE &&
                     result.state != StreamCheckState.PLAYLIST_AND_SEGMENT
                 ) {
+                    problemCount++
                     if (unavailable.size < 60) unavailable.add("• ${channel.name}: ${result.state.label}")
                 }
                 checked++
                 if (checked % 5 == 0 || checked == snapshot.size) {
                     val current = checked
-                    val summary = "Verificati $current / ${snapshot.size} · raggiungibili ${(counts[StreamCheckState.REACHABLE] ?: 0) + (counts[StreamCheckState.PLAYLIST_AND_SEGMENT] ?: 0)} · problemi ${unavailable.size}"
+                    val summary = "Verificati $current / ${snapshot.size} · raggiungibili ${(counts[StreamCheckState.REACHABLE] ?: 0) + (counts[StreamCheckState.PLAYLIST_AND_SEGMENT] ?: 0)} · problemi $problemCount"
                     runOnUiThread {
                         if (!isFinishing && !isDestroyed) {
                             dialog.setMessage(summary + if (streamScanCancelled) "\nInterruzione richiesta…" else "\nUn solo flusso alla volta · nessuna riproduzione simultanea.")
@@ -1360,6 +1369,11 @@ class MainActivity : FragmentActivity() {
                         }
                     }
                 }
+            }
+            if (pendingCache.isNotEmpty()) {
+                val editor = prefs.edit()
+                pendingCache.forEach { (key, value) -> editor.putString(key, value) }
+                editor.apply()
             }
             runOnUiThread {
                 importInProgress = false
