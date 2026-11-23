@@ -1312,6 +1312,12 @@ class MainActivity : FragmentActivity() {
             toast("Attendi la fine dell'operazione in corso.")
             return
         }
+        if (::player.isInitialized && player.playWhenReady &&
+            player.playbackState != Player.STATE_IDLE && player.playbackState != Player.STATE_ENDED
+        ) {
+            toast("Ferma prima la riproduzione: la verifica usa una connessione alla volta.")
+            return
+        }
         val snapshot = channels.map { it.copy() }
         if (snapshot.isEmpty()) {
             toast("Importa prima una playlist o un catalogo.")
