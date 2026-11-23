@@ -13,18 +13,10 @@ import java.util.Locale
 internal data class XtreamCatalogResult(
     val m3u: String,
     val liveCount: Int,
-    val vodCount: Int,
-    val episodeCount: Int,
-    val skippedSeries: Int
+    val excludedNonItalianCount: Int
 )
 
-/**
- * Reads an authorized Xtream API catalog and converts playable entries to M3U.
- *
- * Requests are deliberately sequential (one HTTP request at a time). In particular,
- * this class never opens media streams to "ping" them: doing so can consume provider
- * connection slots. Real playability is established only by Media3 during playback.
- */
+/** Imports only Italian live TV streams. VOD and series API actions are never called. */
 internal class XtreamCatalogClient(
     private val source: XtreamReportSource,
     private val progress: (String) -> Unit = {}
@@ -38,94 +30,49 @@ internal class XtreamCatalogClient(
         val account = getJsonObject(apiUrl())
         val userInfo = account.optJSONObject("user_info")
             ?: throw IOException("Risposta Xtream non valida: dati account assenti.")
-        if (userInfo.optString("auth") != "1") {
-            throw IOException("Credenziali rifiutate dal server Xtream.")
-        }
+        if (userInfo.optString("auth") != "1") throw IOException("Credenziali rifiutate dal server Xtream.")
         val status = userInfo.optString("status")
         if (status.isNotBlank() && !status.equals("Active", true)) {
             throw IOException("Account Xtream non attivo (stato: $status).")
         }
 
+        progress("Recupero categorie Live…")
         val liveCategories = categoryMap("get_live_categories")
-        val vodCategories = categoryMap("get_vod_categories")
-        val seriesCategories = categoryMap("get_series_categories")
-
+        progress("Recupero esclusivo dei canali Live italiani…")
+        val live = getJsonArray(apiUrl("get_live_streams"))
         val output = StringBuilder("#EXTM3U\n")
         var liveCount = 0
-        var vodCount = 0
-        var episodeCount = 0
-        var skippedSeries = 0
+        var excludedNonItalianCount = 0
 
-        progress("Recupero canali Live…")
-        val live = getJsonArray(apiUrl("get_live_streams"))
         for (index in 0 until live.length()) {
             val item = live.optJSONObject(index) ?: continue
             val id = item.optString("stream_id").takeIf { it.isNotBlank() } ?: continue
             val name = item.optString("name").ifBlank { "Canale $id" }
-            val category = categoryName(liveCategories, item.optString("category_id"), "Live")
+            val category = liveCategories[item.optString("category_id")].orEmpty()
+            val metadata = listOf(
+                item.optString("language"), item.optString("lang"), item.optString("country"),
+                item.optString("country_code"), item.optString("countryCode"),
+                item.optString("tvg-country"), item.optString("tvg-language"),
+                item.optString("stream_language"), item.optString("epg_channel_id")
+            ).filter { it.isNotBlank() }
+
+            if (!ItalianLiveChannelFilter.isItalian(name, category, metadata)) {
+                excludedNonItalianCount++
+                continue
+            }
+
             val ext = safeExtension(item.optString("container_extension"), "ts")
             val url = "$base/live/$userSegment/$passwordSegment/$id.$ext"
-            appendEntry(output, name, category, item.optString("stream_icon"), item.optString("epg_channel_id"), url)
+            appendEntry(output, name, category.ifBlank { "Italia" }, item.optString("stream_icon"),
+                item.optString("epg_channel_id"), url)
             liveCount++
         }
 
-        progress("Recupero film VOD…")
-        val vod = getJsonArray(apiUrl("get_vod_streams"))
-        for (index in 0 until vod.length()) {
-            val item = vod.optJSONObject(index) ?: continue
-            val id = item.optString("stream_id").takeIf { it.isNotBlank() } ?: continue
-            val name = item.optString("name").ifBlank { "Film $id" }
-            val category = categoryName(vodCategories, item.optString("category_id"), "Film")
-            val ext = safeExtension(item.optString("container_extension"), "mp4")
-            val url = "$base/movie/$userSegment/$passwordSegment/$id.$ext"
-            appendEntry(output, name, "VOD > $category", item.optString("stream_icon"), "", url)
-            vodCount++
+        if (liveCount == 0) {
+            throw IOException("Nessun canale Live italiano riconosciuto. Film, VOD e serie non sono stati importati. Controlla i nomi e le categorie forniti dal server.")
         }
-
-        progress("Recupero elenco serie…")
-        val series = getJsonArray(apiUrl("get_series"))
-        for (index in 0 until series.length()) {
-            val item = series.optJSONObject(index) ?: continue
-            val seriesId = item.optString("series_id").takeIf { it.isNotBlank() } ?: continue
-            val seriesName = item.optString("name").ifBlank { "Serie $seriesId" }
-            val category = categoryName(seriesCategories, item.optString("category_id"), "Serie TV")
-            progress("Analisi episodi · ${index + 1}/${series.length()} · $seriesName")
-            try {
-                val info = getJsonObject(apiUrl("get_series_info", "series_id" to seriesId))
-                val episodes = info.optJSONObject("episodes")
-                if (episodes == null) {
-                    skippedSeries++
-                    continue
-                }
-                val seasonKeys = episodes.keys().asSequence().toList().sortedBy { it.toIntOrNull() ?: Int.MAX_VALUE }
-                var foundForSeries = 0
-                seasonKeys.forEach { seasonKey ->
-                    val seasonEpisodes = episodes.optJSONArray(seasonKey) ?: return@forEach
-                    for (episodeIndex in 0 until seasonEpisodes.length()) {
-                        val episode = seasonEpisodes.optJSONObject(episodeIndex) ?: continue
-                        val episodeId = episode.optString("id").takeIf { it.isNotBlank() } ?: continue
-                        val extension = safeExtension(episode.optString("container_extension"), "mp4")
-                        val episodeTitle = episode.optString("title").ifBlank { "Episodio ${episodeIndex + 1}" }
-                        val seasonNumber = episode.optString("season").ifBlank { seasonKey }
-                        val displayName = "$seriesName · S${seasonNumber} · $episodeTitle"
-                        val episodeUrl = "$base/series/$userSegment/$passwordSegment/$episodeId.$extension"
-                        val group = "Serie TV > $category > $seriesName"
-                        appendEntry(output, displayName, group, "", "", episodeUrl)
-                        episodeCount++
-                        foundForSeries++
-                    }
-                }
-                if (foundForSeries == 0) skippedSeries++
-            } catch (_: Exception) {
-                // A single unavailable series must not abort the remaining catalog.
-                skippedSeries++
-            }
-        }
-
-        if (liveCount + vodCount + episodeCount == 0) {
-            throw IOException("Il server non ha restituito flussi Live, film o episodi utilizzabili.")
-        }
-        return XtreamCatalogResult(output.toString(), liveCount, vodCount, episodeCount, skippedSeries)
+        progress("Importazione pronta · $liveCount canali Live italiani.")
+        return XtreamCatalogResult(output.toString(), liveCount, excludedNonItalianCount)
     }
 
     private fun categoryMap(action: String): Map<String, String> {
@@ -140,17 +87,7 @@ internal class XtreamCatalogClient(
         return result
     }
 
-    private fun categoryName(categories: Map<String, String>, id: String, fallback: String): String =
-        categories[id]?.takeIf { it.isNotBlank() } ?: fallback
-
-    private fun appendEntry(
-        out: StringBuilder,
-        name: String,
-        group: String,
-        logo: String,
-        tvgId: String,
-        url: String
-    ) {
+    private fun appendEntry(out: StringBuilder, name: String, group: String, logo: String, tvgId: String, url: String) {
         out.append("#EXTINF:-1")
         if (tvgId.isNotBlank()) out.append(" tvg-id=\"").append(attribute(tvgId)).append('"')
         out.append(" tvg-name=\"").append(attribute(name)).append('"')
@@ -158,36 +95,28 @@ internal class XtreamCatalogClient(
             out.append(" tvg-logo=\"").append(attribute(logo)).append('"')
         }
         out.append(" group-title=\"").append(attribute(group)).append("\",")
-            .append(name.replace('\n', ' ').replace('\r', ' '))
-            .append('\n').append(url).append('\n')
+            .append(name.replace('\n', ' ').replace('\r', ' ')).append('\n').append(url).append('\n')
     }
 
     private fun apiUrl(action: String? = null, vararg extra: Pair<String, String>): String {
-        val params = mutableListOf(
-            "username=${queryValue(source.username)}",
-            "password=${queryValue(source.password)}"
-        )
+        val params = mutableListOf("username=${queryValue(source.username)}", "password=${queryValue(source.password)}")
         if (!action.isNullOrBlank()) params += "action=${queryValue(action)}"
         extra.forEach { (key, value) -> params += "${queryValue(key)}=${queryValue(value)}" }
         return "$base/player_api.php?${params.joinToString("&")}"
     }
 
-    private fun getJsonArray(address: String): JSONArray {
-        val body = request(address)
-        return try {
-            JSONArray(body)
-        } catch (error: Exception) {
-            throw IOException("Risposta catalogo Xtream non valida.", error)
-        }
+    private fun getJsonArray(address: String): JSONArray = try {
+        JSONArray(request(address))
+    } catch (error: Exception) {
+        if (error is IOException) throw error
+        throw IOException("Risposta catalogo Xtream non valida.", error)
     }
 
-    private fun getJsonObject(address: String): JSONObject {
-        val body = request(address)
-        return try {
-            JSONObject(body)
-        } catch (error: Exception) {
-            throw IOException("Risposta account Xtream non valida.", error)
-        }
+    private fun getJsonObject(address: String): JSONObject = try {
+        JSONObject(request(address))
+    } catch (error: Exception) {
+        if (error is IOException) throw error
+        throw IOException("Risposta account Xtream non valida.", error)
     }
 
     private fun request(address: String): String {
@@ -195,7 +124,7 @@ internal class XtreamCatalogClient(
             requestMethod = "GET"
             connectTimeout = 15_000
             readTimeout = 30_000
-            instanceFollowRedirects = false // Never forward account credentials to another host.
+            instanceFollowRedirects = false
             setRequestProperty("Accept", "application/json")
             setRequestProperty("Accept-Encoding", "identity")
             setRequestProperty("User-Agent", "DAVIX-Extractor/1.0")
@@ -237,9 +166,6 @@ internal class XtreamCatalogClient(
     private fun attribute(value: String): String =
         value.replace("&", "&amp;").replace("\"", "&quot;").replace("\n", " ").replace("\r", " ")
 
-    private fun queryValue(value: String): String =
-        URLEncoder.encode(value, StandardCharsets.UTF_8.name())
-
-    private fun pathSegment(value: String): String =
-        URLEncoder.encode(value, StandardCharsets.UTF_8.name()).replace("+", "%20")
+    private fun queryValue(value: String): String = URLEncoder.encode(value, StandardCharsets.UTF_8.name())
+    private fun pathSegment(value: String): String = URLEncoder.encode(value, StandardCharsets.UTF_8.name()).replace("+", "%20")
 }
