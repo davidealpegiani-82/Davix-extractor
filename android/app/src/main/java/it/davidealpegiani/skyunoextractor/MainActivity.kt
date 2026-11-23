@@ -123,6 +123,7 @@ class MainActivity : FragmentActivity() {
     private var currentPlayingChannelUrl: String? = null
     private var playingChannelButton: Button? = null
     private var importInProgress = false
+    @Volatile private var streamScanCancelled = false
     // Evita che onStop salvi una lista vuota mentre il ripristino asincrono è ancora in corso.
     private var channelLibraryRestorePending = false
     private lateinit var count: TextView
@@ -541,6 +542,7 @@ class MainActivity : FragmentActivity() {
         button("🔐  Configura MandraKodi · password", false) { showIptvSourceSettings() }
         button("🧭  Esplora catalogo MandraKodi", true) { browseMandraKodiCatalog() }
         button("🌐  Importa playlist M3U da URL", true) { importPlaylistFromUrl() }
+        button("🤖  Importa report Xtream · automatico", true) { showXtreamReportImportDialog() }
         button("🔗  Configura URL M3U ed EPG", false) { showIptvSourceSettings() }
         button("📂  Importa da file", false) { showImportDestinationDialog() }
         button("↻  Importa catalogo MandraKodi da URL diretto · avanzato", false) { importMandraKodiCatalog() }
@@ -581,6 +583,7 @@ class MainActivity : FragmentActivity() {
         row.addView(buttonView("Deseleziona") { channels.forEach { it.selected = false }; persistChannelLibrary(); renderChannels() }, LinearLayout.LayoutParams(0, dp(46), 1f))
         root.addView(row)
         button("▦  Gestisci categorie e sottocartelle", false) { showCategoryManager() }
+        button("🔎  Verifica disponibilità flussi · sequenziale", false) { scanImportedStreams() }
         label("Usa il formato Sezione > Sottosezione, ad esempio Intrattenimento > Cinema.", MUTED, 12f)
         val bulkActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         bulkActions.addView(buttonView("☑  Selezione multipla") {
@@ -923,7 +926,7 @@ class MainActivity : FragmentActivity() {
                 val savedMapping = runCatching { JSONObject(savedMappingJson) }.getOrDefault(JSONObject())
                 val seen = existingKeys.toMutableSet()
                 val prepared = incoming.map { channel ->
-                    val saved = normalizeCategoryPath(savedMapping.optString(channel.url))
+                    val saved = normalizeCategoryPath(savedCategoryForUrl(savedMapping, channel.url))
                     val source = normalizeCategoryPath(channel.category)
                     val inferred = inferUrlCategoryPath(channel.copy(category = source))
                     val manual = saved.isNotBlank() && !isAutomaticallyClassifiedUrlCategory(saved)
@@ -1068,7 +1071,7 @@ class MainActivity : FragmentActivity() {
 
                             found.forEachIndexed { index, channel ->
                                 val sourceGroup = channel.category
-                                val savedCategory = normalizeCategoryPath(savedCategoryMapping.optString(channel.url))
+                                val savedCategory = normalizeCategoryPath(savedCategoryForUrl(savedCategoryMapping, channel.url))
                                 val inferred = inferUrlCategoryPath(channel.copy(category = sourceGroup))
                                 val savedPath = normalizeCategoryPath(savedCategory)
                                 val sourcePath = normalizeCategoryPath(sourceGroup)
@@ -1185,6 +1188,237 @@ class MainActivity : FragmentActivity() {
         }, "DAVIX-Playlist-Download").apply { isDaemon = true }.start()
     }
 
+    private fun showXtreamReportImportDialog() {
+        if (importInProgress) {
+            toast("È già in corso un'importazione.")
+            return
+        }
+        val reportInput = EditText(this).apply {
+            hint = "Incolla qui il report Xtream completo (server, username, password e categorie)…"
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 13f)
+            minLines = 7
+            maxLines = 14
+            gravity = Gravity.TOP or Gravity.START
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+                android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            setTextColor(Color.WHITE)
+            setHintTextColor(MUTED)
+            setBackgroundColor(PANEL)
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), 0)
+            addView(TextView(this@MainActivity).apply {
+                text = "DAVIX legge il report sul dispositivo. Le credenziali vengono salvate cifrate con Android Keystore e non inviate ad alcun servizio AI."
+                textSize = 12f
+                setTextColor(MUTED)
+                setPadding(0, 0, 0, dp(10))
+            })
+            addView(reportInput, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ))
+            addView(TextView(this@MainActivity).apply {
+                text = "L'importazione recupera Live, film e singoli episodi in sequenza. Non apre tutti i video per testarli: evita di consumare le connessioni contemporanee del tuo abbonamento."
+                textSize = 11f
+                setTextColor(MUTED)
+                setPadding(0, dp(10), 0, 0)
+            })
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Importazione automatica Xtream")
+            .setView(content)
+            .setNegativeButton("Annulla", null)
+            .setNeutralButton("Aggiorna sorgente salvata", null)
+            .setPositiveButton("Analizza e importa", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                val savedSource = IptvSourceSettings.xtreamSource(this)
+                if (savedSource == null) {
+                    toast("Non è ancora presente una sorgente Xtream salvata.")
+                    return@setOnClickListener
+                }
+                dialog.dismiss()
+                startXtreamAutomaticImport(savedSource)
+            }
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val source = try {
+                    XtreamReportParser.parse(reportInput.text.toString())
+                } catch (error: Exception) {
+                    reportInput.error = error.message ?: "Report non valido."
+                    return@setOnClickListener
+                }
+                try {
+                    IptvSourceSettings.saveXtreamSource(this, source)
+                } catch (error: Exception) {
+                    toast(error.message ?: "Impossibile salvare la sorgente in modo protetto.")
+                    return@setOnClickListener
+                }
+                dialog.dismiss()
+                startXtreamAutomaticImport(source)
+            }
+        }
+        dialog.show()
+    }
+
+    private fun startXtreamAutomaticImport(source: XtreamReportSource) {
+        if (importInProgress) {
+            toast("È già in corso un'importazione.")
+            return
+        }
+        importInProgress = true
+        status.text = "Connessione alla sorgente Xtream…"
+        updateImportProgress("Verifica account e preparazione catalogo…", null)
+        Thread({
+            var temporaryCatalog: java.io.File? = null
+            try {
+                val result = XtreamCatalogClient(source) { message ->
+                    updateImportProgress(message, null)
+                }.downloadCatalog()
+                cacheDir.listFiles()
+                    ?.filter { it.isFile && it.name.startsWith("davix-xtream-") && it.name.endsWith(".m3u") }
+                    ?.forEach { it.delete() }
+                val bytes = result.m3u.toByteArray(StandardCharsets.UTF_8)
+                val importedFile = java.io.File(cacheDir, "davix-xtream-${System.currentTimeMillis()}.m3u")
+                importedFile.writeBytes(bytes)
+                temporaryCatalog = importedFile
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) {
+                        importInProgress = false
+                        return@runOnUiThread
+                    }
+                    importInProgress = false
+                    status.text = "Catalogo Xtream recuperato · Live: ${result.liveCount} · Film: ${result.vodCount} · Episodi: ${result.episodeCount} · Serie non disponibili: ${result.skippedSeries}. Inserimento senza sovrascrivere l'archivio…"
+                    loadSavedPlaylist(importedFile, deleteAfterImport = true)
+                }
+            } catch (error: Exception) {
+                temporaryCatalog?.delete()
+                runOnUiThread {
+                    importInProgress = false
+                    finishImportProgress()
+                    if (!isFinishing && !isDestroyed) {
+                        status.text = "Importazione Xtream non riuscita: ${error.message ?: "errore di rete"}"
+                        toast(status.text.toString())
+                    }
+                }
+            }
+        }, "DAVIX-Xtream-AutoImport").apply { isDaemon = true }.start()
+    }
+
+    private fun scanImportedStreams() {
+        if (importInProgress) {
+            toast("Attendi la fine dell'operazione in corso.")
+            return
+        }
+        if (::player.isInitialized && player.playWhenReady &&
+            player.playbackState != Player.STATE_IDLE && player.playbackState != Player.STATE_ENDED
+        ) {
+            toast("Ferma prima la riproduzione: la verifica usa una connessione alla volta.")
+            return
+        }
+        val snapshot = channels.map { it.copy() }
+        if (snapshot.isEmpty()) {
+            toast("Importa prima una playlist o un catalogo.")
+            return
+        }
+        streamScanCancelled = false
+        importInProgress = true
+        updateImportProgress("Preparazione verifica sequenziale di ${snapshot.size} flussi…", 0)
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Verifica disponibilità flussi")
+            .setMessage("Controllo uno stream alla volta. Ogni richiesta viene chiusa prima della successiva, per rispettare gli account con una sola connessione.")
+            .setNegativeButton("Interrompi", null)
+            .setCancelable(false)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener { button ->
+                streamScanCancelled = true
+                button.isEnabled = false
+                dialog.getButton(AlertDialog.BUTTON_NEGATIVE).text = "Interruzione…"
+            }
+        }
+        dialog.show()
+
+        Thread({
+            val counts = mutableMapOf<StreamCheckState, Int>()
+            val unavailable = ArrayList<String>()
+            val prefs = getSharedPreferences("davix_stream_scan_v1", MODE_PRIVATE)
+            val pendingCache = LinkedHashMap<String, String>()
+            var problemCount = 0
+            var checked = 0
+            for (index in snapshot.indices) {
+                if (streamScanCancelled) break
+                val channel = snapshot[index]
+                val result = XtreamStreamScanner.check(channel.url)
+                counts[result.state] = (counts[result.state] ?: 0) + 1
+                val cacheValue = result.state.name + "|" + System.currentTimeMillis()
+                pendingCache[XtreamStreamScanner.cacheKey(channel.url)] = cacheValue
+                if (pendingCache.size >= 50) {
+                    val editor = prefs.edit()
+                    pendingCache.forEach { (key, value) -> editor.putString(key, value) }
+                    editor.apply()
+                    pendingCache.clear()
+                }
+                if (result.state != StreamCheckState.REACHABLE &&
+                    result.state != StreamCheckState.PLAYLIST_AND_SEGMENT
+                ) {
+                    problemCount++
+                    if (unavailable.size < 60) unavailable.add("• ${channel.name}: ${result.state.label}")
+                }
+                checked++
+                if (checked % 5 == 0 || checked == snapshot.size) {
+                    val current = checked
+                    val summary = "Verificati $current / ${snapshot.size} · raggiungibili ${(counts[StreamCheckState.REACHABLE] ?: 0) + (counts[StreamCheckState.PLAYLIST_AND_SEGMENT] ?: 0)} · problemi $problemCount"
+                    runOnUiThread {
+                        if (!isFinishing && !isDestroyed) {
+                            dialog.setMessage(summary + if (streamScanCancelled) "\nInterruzione richiesta…" else "\nUn solo flusso alla volta · nessuna riproduzione simultanea.")
+                            updateImportProgress(summary, current * 100 / snapshot.size.coerceAtLeast(1))
+                        }
+                    }
+                }
+            }
+            if (pendingCache.isNotEmpty()) {
+                val editor = prefs.edit()
+                pendingCache.forEach { (key, value) -> editor.putString(key, value) }
+                editor.apply()
+            }
+            runOnUiThread {
+                importInProgress = false
+                finishImportProgress()
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                dialog.dismiss()
+                val reachable = (counts[StreamCheckState.REACHABLE] ?: 0) +
+                    (counts[StreamCheckState.PLAYLIST_AND_SEGMENT] ?: 0)
+                val interrupted = streamScanCancelled
+                status.text = "Verifica completata: $checked / ${snapshot.size} · raggiungibili $reachable · problemi ${checked - reachable}" +
+                    if (interrupted) " · interrotta su richiesta" else ""
+                val report = StringBuilder()
+                    .append("Controllati: $checked / ${snapshot.size}\n")
+                    .append("Raggiungibili: $reachable\n")
+                    .append("Con problemi: ${checked - reachable}\n")
+                if (interrupted) report.append("Verifica interrotta su richiesta.\n")
+                counts.entries.sortedBy { it.key.ordinal }.forEach { (state, amount) ->
+                    report.append("\n").append(state.label).append(": ").append(amount)
+                }
+                if (unavailable.isNotEmpty()) {
+                    report.append("\n\nPrimi flussi da controllare:\n")
+                    unavailable.forEach { report.append(it).append('\n') }
+                    if (checked - reachable > unavailable.size) {
+                        report.append("… altri ").append(checked - reachable - unavailable.size).append(" elementi.")
+                    }
+                }
+                AlertDialog.Builder(this)
+                    .setTitle("Risultato verifica DAVIX")
+                    .setMessage(report.toString())
+                    .setPositiveButton("OK", null)
+                    .show()
+                streamScanCancelled = false
+            }
+        }, "DAVIX-Stream-Scan").apply { isDaemon = true }.start()
+    }
+
     private fun showCloudSyncSettings() {
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -1281,7 +1515,7 @@ class MainActivity : FragmentActivity() {
                         JSONObject()
                             .put("id", "channel-$index")
                             .put("name", channel.name)
-                            .put("url", channel.url)
+                            .put("url", IptvSourceSettings.protectLocalValue(channel.url))
                             .put("logo", channel.logo)
                             .put("category", channel.category)
                             .put("tvgId", channel.tvgId)
@@ -1848,7 +2082,7 @@ class MainActivity : FragmentActivity() {
 
                             parsedFiles.forEach { fileChannels ->
                                 fileChannels.forEach { channel ->
-                                    val savedCategory = mapping.optString(channel.url)
+                                    val savedCategory = savedCategoryForUrl(mapping, channel.url)
                                     if (savedCategory.isNotBlank()) channel.category = normalizeCategoryPath(savedCategory)
                                     channel.category = if (destination != null) {
                                         destination
@@ -2000,7 +2234,7 @@ class MainActivity : FragmentActivity() {
         }
     }
 
-    private fun loadSavedPlaylist(file: java.io.File) {
+    private fun loadSavedPlaylist(file: java.io.File, deleteAfterImport: Boolean = false) {
         if (importInProgress) { toast("È già in corso un'importazione."); return }
         if (!file.exists()) {
             toast("La playlist salvata non è più disponibile.")
@@ -2011,8 +2245,12 @@ class MainActivity : FragmentActivity() {
         updateImportProgress("Caricamento playlist salvata · lettura file…", null)
         Thread({
             try {
-                val found = parseChannels(file.readText(StandardCharsets.UTF_8)) { parsed ->
-                    updateImportProgress("Analisi playlist salvata · $parsed%", parsed)
+                val found = try {
+                    parseChannels(file.readText(StandardCharsets.UTF_8)) { parsed ->
+                        updateImportProgress("Analisi playlist salvata · $parsed%", parsed)
+                    }
+                } finally {
+                    if (deleteAfterImport) file.delete()
                 }
                 if (found.isEmpty()) {
                     runOnUiThread {
@@ -2041,7 +2279,7 @@ class MainActivity : FragmentActivity() {
                         try {
                             val mapping = runCatching { JSONObject(savedMappingJson) }.getOrDefault(JSONObject())
                             found.forEach { channel ->
-                                val savedCategory = normalizeCategoryPath(mapping.optString(channel.url))
+                                val savedCategory = normalizeCategoryPath(savedCategoryForUrl(mapping, channel.url))
                                 channel.category = when {
                                     savedCategory.isBlank() -> inferUrlCategoryPath(channel)
                                     isAutomaticallyClassifiedUrlCategory(savedCategory) -> inferUrlCategoryPath(channel)
@@ -2676,7 +2914,7 @@ class MainActivity : FragmentActivity() {
                         val expanded = JSONArray().apply { expandedSnapshot.forEach { put(it) } }
                         val state = JSONObject().apply {
                             // Versione 2: conserva in modo esplicito la selezione di pubblicazione.
-                            put("version", 2)
+                            put("version", 3)
                             put("channels", savedChannels)
                             put("expandedCategories", expanded)
                             put("savedAt", savedAt)
@@ -2725,6 +2963,7 @@ class MainActivity : FragmentActivity() {
         }
         restoreExecutor.execute {
             var legacySelectionReset = false
+            var archiveNeedsEncryption = false
             val restored = runCatching {
                 val state = channelLibraryAtomicFile().openRead().bufferedReader(StandardCharsets.UTF_8).use {
                     JSONObject(it.readText())
@@ -2736,7 +2975,9 @@ class MainActivity : FragmentActivity() {
                 for (i in 0 until savedChannels.length()) {
                     val item = savedChannels.optJSONObject(i) ?: continue
                     val name = item.optString("name").trim()
-                    val url = item.optString("url").trim()
+                    val storedUrl = item.optString("url").trim()
+                    if (!storedUrl.startsWith("enc:v1:")) archiveNeedsEncryption = true
+                    val url = IptvSourceSettings.unprotectLocalValue(storedUrl)?.trim().orEmpty()
                     if (name.isBlank() || !(url.startsWith("https://", true) || url.startsWith("http://", true))) continue
                     val category = normalizeCategoryPath(item.optString("category", "Non classificati"))
                         .ifBlank { "Non classificati" }
@@ -2767,9 +3008,11 @@ class MainActivity : FragmentActivity() {
                     Log.i("DAVIX-ARCHIVE", "Ripristinati " + channels.size + " canali dall’archivio locale")
                     renderChannels()
                     renderSavedPlaylists()
+                    // Rewrites legacy URL-keyed category preferences using non-reversible URL fingerprints.
+                    saveCategorySettings()
                     // Migrazione una tantum: gli archivi precedenti partivano tutti selezionati.
                     // Dalla versione 2 in poi lo stato scelto dall'utente viene mantenuto.
-                    if (legacySelectionReset) persistChannelLibrary()
+                    if (legacySelectionReset || archiveNeedsEncryption) persistChannelLibrary()
                     if (channels.isEmpty()) restoreMostRecentSavedPlaylist()
                 }.onFailure {
                     // Non cancellare o sovrascrivere un archivio illeggibile: serve per diagnosi e recupero.
@@ -2801,10 +3044,16 @@ class MainActivity : FragmentActivity() {
         if ("Non classificati" !in categories) categories.add("Non classificati")
     }
 
+    private fun categoryMappingKey(url: String): String =
+        "urlsha256:" + XtreamStreamScanner.cacheKey(url)
+
+    private fun savedCategoryForUrl(mapping: JSONObject, url: String): String =
+        mapping.optString(categoryMappingKey(url)).ifBlank { mapping.optString(url) }
+
     private fun restoreChannelCategories(items: List<TvChannel>) {
         val mapping = runCatching { JSONObject(categoryPrefs.getString("channel_categories_json", "{}") ?: "{}") }.getOrNull() ?: return
         items.forEach { channel ->
-            val savedCategory = mapping.optString(channel.url)
+            val savedCategory = savedCategoryForUrl(mapping, channel.url)
             if (savedCategory.isNotBlank()) channel.category = normalizeCategoryPath(savedCategory)
             if (channel.category !in categories) categories.add(channel.category)
         }
@@ -2813,7 +3062,7 @@ class MainActivity : FragmentActivity() {
     private fun saveCategorySettings() {
         // Snapshot leggero sul main thread; JSON e aggiornamento preferenze sono serializzati sul writer.
         val categorySnapshot = categories.toList()
-        val channelCategorySnapshot = channels.map { it.url to it.category }
+        val channelCategorySnapshot = channels.map { categoryMappingKey(it.url) to it.category }
         runCatching {
             archiveExecutor.execute {
                 runCatching {
