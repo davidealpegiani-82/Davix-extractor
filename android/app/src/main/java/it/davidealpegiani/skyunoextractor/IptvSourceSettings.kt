@@ -44,13 +44,15 @@ internal object IptvSourceSettings {
 
     fun saveXtreamSource(context: Context, source: XtreamReportSource) {
         val base = validate(source.baseUrl, "server Xtream")
+        val epg = source.epgUrl?.let { validate(it, "XMLTV") }?.takeIf { it.isNotBlank() }
         require(source.username.isNotBlank() && source.username.length <= 512)
         require(source.password.isNotBlank() && source.password.length <= 512)
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+        val editor = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putString(XTREAM_BASE, encrypt(base))
             .putString(XTREAM_USERNAME, encrypt(source.username))
             .putString(XTREAM_PASSWORD, encrypt(source.password))
-            .apply()
+        if (epg != null) editor.putString(EPG, encrypt(epg))
+        editor.apply()
     }
 
     fun xtreamSource(context: Context): XtreamReportSource? {
