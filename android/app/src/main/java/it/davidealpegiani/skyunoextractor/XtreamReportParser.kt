@@ -1,6 +1,5 @@
 package it.davidealpegiani.skyunoextractor
 
-import android.net.Uri
 import java.net.URI
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
@@ -139,11 +138,13 @@ internal object XtreamReportParser {
                 active = true
                 return@forEach
             }
-            if (active && Regex("""^[A-Za-z][A-Za-z _-]{1,24}\s*:?$""").matches(line)) {
-                val heading = normalizeLabel(line.trimEnd(':'))
-                if (listOf("live", "vod", "series", "serie", "epg", "server", "account", "username", "password")
-                        .any { heading == normalizeLabel(it) }) active = false
-            }
+            val isSectionHeading = Regex("""^[A-Za-z][A-Za-z _-]{1,32}\s*:?$""").matches(line) &&
+                listOf("live", "live categories", "categorie live", "tv", "vod", "vod categories",
+                    "categorie vod", "movies", "movie", "film", "series", "series categories",
+                    "categorie serie", "serie", "serie tv", "epg", "server", "account",
+                    "username", "password")
+                    .any { normalized == normalizeLabel(it) }
+            if (active && isSectionHeading) active = false
             if (active) {
                 val category = line.removePrefix("-").removePrefix("•").trim()
                 if (category.length in 2..120 && !category.contains("://") &&
