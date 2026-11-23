@@ -2270,7 +2270,7 @@ class MainActivity : FragmentActivity() {
                         try {
                             val mapping = runCatching { JSONObject(savedMappingJson) }.getOrDefault(JSONObject())
                             found.forEach { channel ->
-                                val savedCategory = normalizeCategoryPath(mapping.optString(channel.url))
+                                val savedCategory = normalizeCategoryPath(savedCategoryForUrl(mapping, channel.url))
                                 channel.category = when {
                                     savedCategory.isBlank() -> inferUrlCategoryPath(channel)
                                     isAutomaticallyClassifiedUrlCategory(savedCategory) -> inferUrlCategoryPath(channel)
@@ -3042,7 +3042,7 @@ class MainActivity : FragmentActivity() {
     private fun restoreChannelCategories(items: List<TvChannel>) {
         val mapping = runCatching { JSONObject(categoryPrefs.getString("channel_categories_json", "{}") ?: "{}") }.getOrNull() ?: return
         items.forEach { channel ->
-            val savedCategory = mapping.optString(channel.url)
+            val savedCategory = savedCategoryForUrl(mapping, channel.url)
             if (savedCategory.isNotBlank()) channel.category = normalizeCategoryPath(savedCategory)
             if (channel.category !in categories) categories.add(channel.category)
         }
