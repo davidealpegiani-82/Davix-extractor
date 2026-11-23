@@ -131,21 +131,44 @@ internal class XtreamCatalogClient(
         }
         try {
             val code = connection.responseCode
-            if (code in 300..399) throw IOException("Il server Xtream ha richiesto un reindirizzamento non consentito.")
+            if (code in 300..399) {
+                val location = connection.getHeaderField("Location")
+                    ?.let(::safeLocation)
+                val redirectDetails = buildList {
+                    if (!location.isNullOrBlank()) add("Destinazione: $location")
+                    add("Endpoint: ${safeEndpoint(address)}")
+                }.joinToString(" · ")
+                throw IOException("Il server Xtream ha richiesto un reindirizzamento HTTP $code non seguito automaticamente. $redirectDetails")
+            }
             if (code !in 200..299) {
                 val serverMessage = runCatching { connection.responseMessage }.getOrNull()
                     ?.takeIf { it.isNotBlank() }
-                val contentType = connection.getHeaderField("Content-Type")
-                    ?.take(120)
+                val contentType = connection.getHeaderField("Content-Type")?.take(120)
                 val responseBody = readErrorBody(connection)
-                    .replace(source.username, "[UTENTE]")
-                    .replace(source.password, "[PASSWORD]")
+                    .let { body ->
+                        source.username.takeIf { it.isNotEmpty() }?.let { body.replace(it, "[UTENTE]") } ?: body
+                    }
+                    .let { body ->
+                        source.password.takeIf { it.isNotEmpty() }?.let { body.replace(it, "[PASSWORD]") } ?: body
+                    }
                     .take(600)
                     .replace(Regex("\\s+"), " ")
+                val diagnosticHeaders = listOf(
+                    "Server" to connection.getHeaderField("Server"),
+                    "Via" to connection.getHeaderField("Via"),
+                    "CF-Ray" to connection.getHeaderField("CF-Ray"),
+                    "X-Cache" to connection.getHeaderField("X-Cache"),
+                    "X-Request-ID" to connection.getHeaderField("X-Request-ID")
+                ).mapNotNull { (name, value) ->
+                    value?.takeIf { it.isNotBlank() }?.let { "$name: ${it.take(160)}" }
+                }
                 val details = buildList {
                     if (!serverMessage.isNullOrBlank()) add(serverMessage)
+                    add("Endpoint: ${safeEndpoint(address)}")
                     if (!contentType.isNullOrBlank()) add("Content-Type: $contentType")
+                    addAll(diagnosticHeaders)
                     if (responseBody.isNotBlank()) add("Risposta: $responseBody")
+                    else add("Corpo risposta: assente o non leggibile")
                 }.joinToString(" · ")
                 val message = when (code) {
                     401, 403 -> "Accesso Xtream negato (HTTP $code)."
@@ -153,7 +176,7 @@ internal class XtreamCatalogClient(
                     513 -> "Il server o un intermediario ha rifiutato la richiesta iniziale Xtream (HTTP 513)."
                     else -> "Errore del server Xtream (HTTP $code)."
                 }
-                throw IOException(if (details.isBlank()) message else "$message $details")
+                throw IOException("$message $details")
             }
             val output = ByteArrayOutputStream()
             connection.inputStream.use { input ->
@@ -172,6 +195,26 @@ internal class XtreamCatalogClient(
             connection.disconnect()
         }
     }
+
+    /** Returns only scheme, host, port and path; query parameters contain credentials. */
+    private fun safeEndpoint(address: String): String = runCatching {
+        val url = URL(address)
+        buildString {
+            append(url.protocol).append("://").append(url.host)
+            if (url.port != -1) append(":").append(url.port)
+            append(url.path)
+        }
+    }.getOrDefault("[endpoint non disponibile]")
+
+    /** Removes query and fragment so redirect URLs cannot expose account credentials. */
+    private fun safeLocation(location: String): String = runCatching {
+        val url = URL(location)
+        buildString {
+            append(url.protocol).append("://").append(url.host)
+            if (url.port != -1) append(":").append(url.port)
+            append(url.path)
+        }
+    }.getOrDefault("[destinazione non leggibile]")
 
     private fun readErrorBody(connection: HttpURLConnection): String {
         val stream = runCatching { connection.errorStream }.getOrNull() ?: return ""
