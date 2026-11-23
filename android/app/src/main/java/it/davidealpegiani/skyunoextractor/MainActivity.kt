@@ -101,6 +101,9 @@ class MainActivity : FragmentActivity() {
     private val bulkSelectedIndices = mutableSetOf<Int>()
     // Limita le View create contemporaneamente per ogni cartella: le playlist IPTV possono contenere migliaia di righe.
     private val folderPageSizes = mutableMapOf<String, Int>()
+    // Limiti globali di rendering: una playlist con migliaia di gruppi non deve bloccare il thread UI.
+    private val folderRenderLimits = mutableMapOf<String, Int>()
+    private val channelRenderLimits = mutableMapOf<String, Int>()
     // Le cartelle sono chiuse per impostazione predefinita: niente liste chilometriche.
     private val expandedCategoryPaths = mutableSetOf<String>()
     // null = conserva i group-title originali della playlist.
@@ -170,6 +173,8 @@ class MainActivity : FragmentActivity() {
         private const val PANEL = 0xFF121A29.toInt()
         private const val MUTED = 0xFF9EACC0.toInt()
         private const val CHANNELS_PER_FOLDER_PAGE = 100
+        private const val FOLDERS_PER_RENDER_PAGE = 80
+        private const val CHANNELS_PER_RENDER_PAGE = 120
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -2367,6 +2372,13 @@ class MainActivity : FragmentActivity() {
             })
         }
         fun addFolderGroups(items: List<IndexedValue<TvChannel>>, target: LinearLayout, prefix: String) {
+            // Il numero di View create in un singolo frame resta limitato anche con archivi enormi.
+            val folderLimit = folderRenderLimits[prefix] ?: FOLDERS_PER_RENDER_PAGE
+            val channelLimit = channelRenderLimits[prefix] ?: CHANNELS_PER_RENDER_PAGE
+            var renderedFolders = 0
+            var renderedChannelRows = 0
+            var hasMoreFolders = false
+            var hasMoreChannelRows = false
             data class FolderNode(
                 val name: String,
                 val path: String,
@@ -2388,6 +2400,11 @@ class MainActivity : FragmentActivity() {
             }
 
             fun renderFolderNode(node: FolderNode, depth: Int) {
+                if (renderedFolders >= folderLimit) {
+                    hasMoreFolders = true
+                    return
+                }
+                renderedFolders++
                 val key = "$prefix:${node.path}"
                 val expanded = key in expandedCategoryPaths
                 val total = node.totalCount
@@ -2493,7 +2510,10 @@ class MainActivity : FragmentActivity() {
                 if (expanded) {
                     val visibleLimit = (folderPageSizes[key] ?: CHANNELS_PER_FOLDER_PAGE)
                         .coerceAtLeast(CHANNELS_PER_FOLDER_PAGE)
-                    node.entries.take(visibleLimit).forEach { entry ->
+                    val remainingChannelSlots = (channelLimit - renderedChannelRows).coerceAtLeast(0)
+                    val rowsToRender = minOf(node.entries.size, visibleLimit, remainingChannelSlots)
+                    node.entries.take(rowsToRender).forEach { entry ->
+                        renderedChannelRows++
                         val holder = LinearLayout(this).apply {
                             setPadding(dp(10 + (depth + 1) * 14), 0, 0, 0)
                         }
@@ -2501,6 +2521,9 @@ class MainActivity : FragmentActivity() {
                         target.addView(holder, LinearLayout.LayoutParams(
                             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
                         ))
+                    }
+                    if (node.entries.size > rowsToRender && renderedChannelRows >= channelLimit) {
+                        hasMoreChannelRows = true
                     }
                     if (node.entries.size > visibleLimit) {
                         val remaining = node.entries.size - visibleLimit
@@ -2513,13 +2536,35 @@ class MainActivity : FragmentActivity() {
                             ViewGroup.LayoutParams.MATCH_PARENT, dp(42)
                         ).apply { bottomMargin = dp(6) })
                     }
-                    node.children.values.sortedBy { it.name.lowercase(Locale.ROOT) }
-                        .forEach { child -> renderFolderNode(child, depth + 1) }
+                    for (child in node.children.values.sortedBy { it.name.lowercase(Locale.ROOT) }) {
+                        if (renderedFolders >= folderLimit) {
+                            hasMoreFolders = true
+                            break
+                        }
+                        renderFolderNode(child, depth + 1)
+                    }
                 }
             }
 
-            rootNode.children.values.sortedBy { it.name.lowercase(Locale.ROOT) }
-                .forEach { node -> renderFolderNode(node, 0) }
+            for (node in rootNode.children.values.sortedBy { it.name.lowercase(Locale.ROOT) }) {
+                if (renderedFolders >= folderLimit) {
+                    hasMoreFolders = true
+                    break
+                }
+                renderFolderNode(node, 0)
+            }
+            if (hasMoreFolders) {
+                target.addView(buttonView("Mostra altre $FOLDERS_PER_RENDER_PAGE cartelle") {
+                    folderRenderLimits[prefix] = folderLimit + FOLDERS_PER_RENDER_PAGE
+                    renderChannels()
+                }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44)).apply { bottomMargin = dp(6) })
+            }
+            if (hasMoreChannelRows) {
+                target.addView(buttonView("Mostra altri $CHANNELS_PER_RENDER_PAGE canali") {
+                    channelRenderLimits[prefix] = channelLimit + CHANNELS_PER_RENDER_PAGE
+                    renderChannels()
+                }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44)).apply { bottomMargin = dp(6) })
+            }
         }
         addFolderGroups(selected, selectedList, "selected")
         addFolderGroups(others, otherList, "other")
