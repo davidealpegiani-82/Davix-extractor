@@ -1220,7 +1220,7 @@ class MainActivity : FragmentActivity() {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
             ))
             addView(TextView(this@MainActivity).apply {
-                text = "L'importazione recupera Live, film e singoli episodi in sequenza. Non apre tutti i video per testarli: evita di consumare le connessioni contemporanee del tuo abbonamento."
+                text = "Vengono recuperati esclusivamente i canali Live italiani. Film, VOD, serie ed episodi non vengono richiesti né importati. La verifica non apre tutti i flussi: evita di consumare le connessioni contemporanee del tuo abbonamento."
                 textSize = 11f
                 setTextColor(MUTED)
                 setPadding(0, dp(10), 0, 0)
@@ -1290,7 +1290,7 @@ class MainActivity : FragmentActivity() {
                         return@runOnUiThread
                     }
                     importInProgress = false
-                    status.text = "Catalogo Xtream recuperato · Live: ${result.liveCount} · Film: ${result.vodCount} · Episodi: ${result.episodeCount} · Serie non disponibili: ${result.skippedSeries}. Inserimento senza sovrascrivere l'archivio…"
+                    status.text = "Canali Live italiani recuperati: ${result.liveCount} · esclusi non italiani: ${result.excludedNonItalianCount}. Inserimento senza sovrascrivere l'archivio…"
                     loadSavedPlaylist(importedFile, deleteAfterImport = true)
                 }
             } catch (error: Exception) {
