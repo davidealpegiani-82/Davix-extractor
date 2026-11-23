@@ -541,6 +541,7 @@ class MainActivity : FragmentActivity() {
         button("🔐  Configura MandraKodi · password", false) { showIptvSourceSettings() }
         button("🧭  Esplora catalogo MandraKodi", true) { browseMandraKodiCatalog() }
         button("🌐  Importa playlist M3U da URL", true) { importPlaylistFromUrl() }
+        button("🤖  Importa report Xtream · automatico", true) { showXtreamReportImportDialog() }
         button("🔗  Configura URL M3U ed EPG", false) { showIptvSourceSettings() }
         button("📂  Importa da file", false) { showImportDestinationDialog() }
         button("↻  Importa catalogo MandraKodi da URL diretto · avanzato", false) { importMandraKodiCatalog() }
@@ -1183,6 +1184,112 @@ class MainActivity : FragmentActivity() {
                 }
             }
         }, "DAVIX-Playlist-Download").apply { isDaemon = true }.start()
+    }
+
+    private fun showXtreamReportImportDialog() {
+        if (importInProgress) {
+            toast("È già in corso un'importazione.")
+            return
+        }
+        val reportInput = EditText(this).apply {
+            hint = "Incolla qui il report Xtream completo (server, username, password e categorie)…"
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 13f)
+            minLines = 7
+            maxLines = 14
+            gravity = Gravity.TOP or Gravity.START
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+                android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            setTextColor(Color.WHITE)
+            setHintTextColor(MUTED)
+            setBackgroundColor(PANEL)
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), 0)
+            addView(TextView(this@MainActivity).apply {
+                text = "DAVIX legge il report sul dispositivo. Le credenziali vengono salvate cifrate con Android Keystore e non inviate ad alcun servizio AI."
+                textSize = 12f
+                setTextColor(MUTED)
+                setPadding(0, 0, 0, dp(10))
+            })
+            addView(reportInput, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ))
+            addView(TextView(this@MainActivity).apply {
+                text = "L'importazione recupera Live, film e singoli episodi in sequenza. Non apre tutti i video per testarli: evita di consumare le connessioni contemporanee del tuo abbonamento."
+                textSize = 11f
+                setTextColor(MUTED)
+                setPadding(0, dp(10), 0, 0)
+            })
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Importazione automatica Xtream")
+            .setView(content)
+            .setNegativeButton("Annulla", null)
+            .setPositiveButton("Analizza e importa", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val source = try {
+                    XtreamReportParser.parse(reportInput.text.toString())
+                } catch (error: Exception) {
+                    reportInput.error = error.message ?: "Report non valido."
+                    return@setOnClickListener
+                }
+                try {
+                    IptvSourceSettings.saveXtreamSource(this, source)
+                } catch (error: Exception) {
+                    toast(error.message ?: "Impossibile salvare la sorgente in modo protetto.")
+                    return@setOnClickListener
+                }
+                dialog.dismiss()
+                startXtreamAutomaticImport(source)
+            }
+        }
+        dialog.show()
+    }
+
+    private fun startXtreamAutomaticImport(source: XtreamReportSource) {
+        if (importInProgress) {
+            toast("È già in corso un'importazione.")
+            return
+        }
+        importInProgress = true
+        status.text = "Connessione alla sorgente Xtream…"
+        updateImportProgress("Verifica account e preparazione catalogo…", null)
+        Thread({
+            try {
+                val result = XtreamCatalogClient(source) { message ->
+                    updateImportProgress(message, null)
+                }.downloadCatalog()
+                val bytes = result.m3u.toByteArray(StandardCharsets.UTF_8)
+                savePlaylistCopy("catalogo-xtream-automatico.m3u", bytes)
+                val importedFile = savedPlaylistDirectory().listFiles()
+                    ?.filter { it.isFile && it.name.endsWith("_catalogo-xtream-automatico.m3u") }
+                    ?.maxByOrNull { it.lastModified() }
+                    ?: throw IOException("Catalogo creato ma file temporaneo non trovato.")
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) {
+                        importInProgress = false
+                        return@runOnUiThread
+                    }
+                    importInProgress = false
+                    status.text = "Catalogo Xtream recuperato · Live: ${result.liveCount} · Film: ${result.vodCount} · Episodi: ${result.episodeCount} · Serie non disponibili: ${result.skippedSeries}. Inserimento senza sovrascrivere l'archivio…"
+                    loadSavedPlaylist(importedFile)
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    importInProgress = false
+                    finishImportProgress()
+                    if (!isFinishing && !isDestroyed) {
+                        status.text = "Importazione Xtream non riuscita: ${error.message ?: "errore di rete"}"
+                        toast(status.text.toString())
+                    }
+                }
+            }
+        }, "DAVIX-Xtream-AutoImport").apply { isDaemon = true }.start()
     }
 
     private fun showCloudSyncSettings() {
