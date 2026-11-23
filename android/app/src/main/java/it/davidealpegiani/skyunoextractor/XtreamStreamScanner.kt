@@ -31,7 +31,7 @@ internal data class StreamCheckResult(
  * checks the manifest and one media segment. It does not claim to decode video.
  */
 internal object XtreamStreamScanner {
-    private data class Probe(val code: Int, val contentType: String, val body: ByteArray, val redirect: String?)
+    private data class Probe(val url: URL, val code: Int, val contentType: String, val body: ByteArray, val redirect: String?)
 
     fun check(streamUrl: String): StreamCheckResult {
         return try {
@@ -84,8 +84,7 @@ internal object XtreamStreamScanner {
                 return StreamCheckResult(StreamCheckState.REACHABLE, "Manifest HLS accessibile; nessun segmento nel campione")
             }
             return try {
-                val manifestUrl = URL(probe.redirect ?: "http://invalid.local")
-                val segmentUrl = URL(manifestUrl, firstResource)
+                val segmentUrl = URL(probe.url, firstResource)
                 val segment = request(segmentUrl)
                 if (segment.code in 200..299) {
                     StreamCheckResult(StreamCheckState.PLAYLIST_AND_SEGMENT, "Manifest e primo segmento accessibili")
@@ -130,7 +129,7 @@ internal object XtreamStreamScanner {
                 }
                 output.toByteArray()
             }
-            return Probe(code, connection.contentType.orEmpty(), body, redirect)
+            return Probe(url, code, connection.contentType.orEmpty(), body, redirect)
         } finally {
             connection.disconnect()
         }
