@@ -538,11 +538,12 @@ class MainActivity : FragmentActivity() {
 
         section("1 · CARICA LA PLAYLIST")
         label("Importa da un file oppure collega direttamente la tua playlist IPTV e la guida XMLTV tramite URL.", MUTED)
-        button("🔗  Configura URL M3U ed EPG", false) { showIptvSourceSettings() }
-        button("🌐  Importa playlist direttamente da URL", true) { importPlaylistFromUrl() }
-        button("🛰  Sincronizza catalogo MandraKodi", false) { importMandraKodiCatalog() }
+        button("🔐  Configura MandraKodi · password", false) { showIptvSourceSettings() }
         button("🧭  Esplora catalogo MandraKodi", true) { browseMandraKodiCatalog() }
-        button("📂  Seleziona file", false) { showImportDestinationDialog() }
+        button("🌐  Importa playlist M3U da URL", true) { importPlaylistFromUrl() }
+        button("🔗  Configura URL M3U ed EPG", false) { showIptvSourceSettings() }
+        button("📂  Importa da file", false) { showImportDestinationDialog() }
+        button("↻  Importa catalogo MandraKodi da URL diretto · avanzato", false) { importMandraKodiCatalog() }
         status = label("Nessun file caricato.", MUTED)
         importProgressPanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -667,6 +668,12 @@ class MainActivity : FragmentActivity() {
             transformationMethod = android.text.method.PasswordTransformationMethod.getInstance()
             setText(IptvSourceSettings.epgUrl(this@MainActivity))
         }
+        val mandraKodiPasswordInput = EditText(this).apply {
+            hint = if (IptvSourceSettings.mandraKodiPassword(this@MainActivity).isBlank()) "Inserisci la password impostata in MandraKodi" else "Password già salvata · lascia vuoto per mantenerla"
+            setSingleLine(true)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            transformationMethod = android.text.method.PasswordTransformationMethod.getInstance()
+        }
         val mandraKodiVersionInput = EditText(this).apply {
             hint = "2.2.1.e"
             setSingleLine(true)
@@ -683,8 +690,11 @@ class MainActivity : FragmentActivity() {
         content.addView(playlistInput)
         content.addView(labelForDialog("URL GUIDA XMLTV · credenziali nascoste"))
         content.addView(epgInput)
+        content.addView(labelForDialog("PASSWORD MANDRAKODI · inseriscila direttamente qui, senza esportare file da Kodi"))
+        content.addView(mandraKodiPasswordInput)
         content.addView(labelForDialog("VERSIONE ADD-ON MANDRAKODI · deve corrispondere a quella installata in Kodi"))
         content.addView(mandraKodiVersionInput)
+        content.addView(labelForDialog("DAVIX genera e conserva automaticamente un ID dispositivo di 6 caratteri. Password e ID sono cifrati con Android Keystore."))
         content.addView(labelForDialog("URL CATALOGO MANDRAKODI · feed M3U/JSON diretto (facoltativo)"))
         content.addView(mandraKodiInput)
         content.addView(labelForDialog("Gli indirizzi vengono cifrati sul dispositivo. MandraKodi deve fornire un feed diretto M3U/JSON accessibile; menu Kodi, script e azioni resolver non vengono eseguiti."))
@@ -709,8 +719,12 @@ class MainActivity : FragmentActivity() {
                                 mandraKodiInput.text.toString()
                             )
                             IptvSourceSettings.saveMandraKodiAddonVersion(this, mandraKodiVersionInput.text.toString())
+                            val enteredPassword = mandraKodiPasswordInput.text.toString().trim()
+                            if (enteredPassword.isNotEmpty()) {
+                                IptvSourceSettings.saveMandraKodiCredentials(this, enteredPassword)
+                            }
                             dialog.dismiss()
-                            toast("URL M3U ed XMLTV salvati in modo protetto.")
+                            toast(if (enteredPassword.isNotEmpty()) "Sorgenti e credenziali MandraKodi salvate in modo protetto." else "Sorgenti salvate. La password MandraKodi già configurata è stata mantenuta.")
                         } catch (e: Exception) {
                             toast(e.message ?: "Indirizzo non valido.")
                         }
@@ -791,7 +805,7 @@ class MainActivity : FragmentActivity() {
 
     private fun browseMandraKodiCatalog() {
         val userAgent = runCatching { IptvSourceSettings.mandraKodiUserAgent(this) }.getOrElse {
-            toast(it.message ?: "Importa prima le impostazioni MandraKodi da Kodi.")
+            toast(it.message ?: "Inserisci la password MandraKodi nella configurazione DAVIX.")
             showIptvSourceSettings()
             return
         }
