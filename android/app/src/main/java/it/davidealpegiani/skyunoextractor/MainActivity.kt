@@ -123,6 +123,7 @@ class MainActivity : FragmentActivity() {
     private var currentPlayingChannelUrl: String? = null
     private var playingChannelButton: Button? = null
     private var importInProgress = false
+    @Volatile private var streamScanCancelled = false
     // Evita che onStop salvi una lista vuota mentre il ripristino asincrono è ancora in corso.
     private var channelLibraryRestorePending = false
     private lateinit var count: TextView
@@ -582,6 +583,7 @@ class MainActivity : FragmentActivity() {
         row.addView(buttonView("Deseleziona") { channels.forEach { it.selected = false }; persistChannelLibrary(); renderChannels() }, LinearLayout.LayoutParams(0, dp(46), 1f))
         root.addView(row)
         button("▦  Gestisci categorie e sottocartelle", false) { showCategoryManager() }
+        button("🔎  Verifica disponibilità flussi · sequenziale", false) { scanImportedStreams() }
         label("Usa il formato Sezione > Sottosezione, ad esempio Intrattenimento > Cinema.", MUTED, 12f)
         val bulkActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         bulkActions.addView(buttonView("☑  Selezione multipla") {
@@ -1290,6 +1292,98 @@ class MainActivity : FragmentActivity() {
                 }
             }
         }, "DAVIX-Xtream-AutoImport").apply { isDaemon = true }.start()
+    }
+
+    private fun scanImportedStreams() {
+        if (importInProgress) {
+            toast("Attendi la fine dell'operazione in corso.")
+            return
+        }
+        val snapshot = channels.map { it.copy() }
+        if (snapshot.isEmpty()) {
+            toast("Importa prima una playlist o un catalogo.")
+            return
+        }
+        streamScanCancelled = false
+        importInProgress = true
+        updateImportProgress("Preparazione verifica sequenziale di ${snapshot.size} flussi…", 0)
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Verifica disponibilità flussi")
+            .setMessage("Controllo uno stream alla volta. Ogni richiesta viene chiusa prima della successiva, per rispettare gli account con una sola connessione.")
+            .setNegativeButton("Interrompi", null)
+            .setCancelable(false)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener { button ->
+                streamScanCancelled = true
+                button.isEnabled = false
+                button.text = "Interruzione…"
+            }
+        }
+        dialog.show()
+
+        Thread({
+            val counts = mutableMapOf<StreamCheckState, Int>()
+            val unavailable = ArrayList<String>()
+            val prefs = getSharedPreferences("davix_stream_scan_v1", MODE_PRIVATE)
+            var checked = 0
+            for (index in snapshot.indices) {
+                if (streamScanCancelled) break
+                val channel = snapshot[index]
+                val result = XtreamStreamScanner.check(channel.url)
+                counts[result.state] = (counts[result.state] ?: 0) + 1
+                val cacheValue = result.state.name + "|" + System.currentTimeMillis()
+                prefs.edit().putString(XtreamStreamScanner.cacheKey(channel.url), cacheValue).apply()
+                if (result.state != StreamCheckState.REACHABLE &&
+                    result.state != StreamCheckState.PLAYLIST_AND_SEGMENT
+                ) {
+                    if (unavailable.size < 60) unavailable.add("• ${channel.name}: ${result.state.label}")
+                }
+                checked++
+                if (checked % 5 == 0 || checked == snapshot.size) {
+                    val current = checked
+                    val summary = "Verificati $current / ${snapshot.size} · raggiungibili ${(counts[StreamCheckState.REACHABLE] ?: 0) + (counts[StreamCheckState.PLAYLIST_AND_SEGMENT] ?: 0)} · problemi ${unavailable.size}"
+                    runOnUiThread {
+                        if (!isFinishing && !isDestroyed) {
+                            dialog.setMessage(summary + if (streamScanCancelled) "\nInterruzione richiesta…" else "\nUn solo flusso alla volta · nessuna riproduzione simultanea.")
+                            updateImportProgress(summary, current * 100 / snapshot.size.coerceAtLeast(1))
+                        }
+                    }
+                }
+            }
+            runOnUiThread {
+                importInProgress = false
+                finishImportProgress()
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                dialog.dismiss()
+                val reachable = (counts[StreamCheckState.REACHABLE] ?: 0) +
+                    (counts[StreamCheckState.PLAYLIST_AND_SEGMENT] ?: 0)
+                val interrupted = streamScanCancelled
+                status.text = "Verifica completata: $checked / ${snapshot.size} · raggiungibili $reachable · problemi ${checked - reachable}" +
+                    if (interrupted) " · interrotta su richiesta" else ""
+                val report = StringBuilder()
+                    .append("Controllati: $checked / ${snapshot.size}\n")
+                    .append("Raggiungibili: $reachable\n")
+                    .append("Con problemi: ${checked - reachable}\n")
+                if (interrupted) report.append("Verifica interrotta su richiesta.\n")
+                counts.entries.sortedBy { it.key.ordinal }.forEach { (state, amount) ->
+                    report.append("\n").append(state.label).append(": ").append(amount)
+                }
+                if (unavailable.isNotEmpty()) {
+                    report.append("\n\nPrimi flussi da controllare:\n")
+                    unavailable.forEach { report.append(it).append('\n') }
+                    if (checked - reachable > unavailable.size) {
+                        report.append("… altri ").append(checked - reachable - unavailable.size).append(" elementi.")
+                    }
+                }
+                AlertDialog.Builder(this)
+                    .setTitle("Risultato verifica DAVIX")
+                    .setMessage(report.toString())
+                    .setPositiveButton("OK", null)
+                    .show()
+                streamScanCancelled = false
+            }
+        }, "DAVIX-Stream-Scan").apply { isDaemon = true }.start()
     }
 
     private fun showCloudSyncSettings() {
