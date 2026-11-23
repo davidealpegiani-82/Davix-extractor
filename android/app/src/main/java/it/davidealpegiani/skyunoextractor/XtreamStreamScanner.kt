@@ -85,6 +85,9 @@ internal object XtreamStreamScanner {
             }
             return try {
                 val segmentUrl = URL(probe.url, firstResource)
+                if (!segmentUrl.host.equals(probe.url.host, true)) {
+                    return StreamCheckResult(StreamCheckState.REACHABLE, "Manifest accessibile; segmento su host esterno non verificato")
+                }
                 val segment = request(segmentUrl)
                 if (segment.code in 200..299) {
                     StreamCheckResult(StreamCheckState.PLAYLIST_AND_SEGMENT, "Manifest e primo segmento accessibili")
@@ -116,7 +119,11 @@ internal object XtreamStreamScanner {
         try {
             val code = connection.responseCode
             val redirect = if (code in 300..399) connection.getHeaderField("Location") else null
-            val stream = if (code >= 400) connection.errorStream else connection.inputStream
+            val stream = when {
+                code in 300..399 -> null
+                code >= 400 -> connection.errorStream
+                else -> connection.inputStream
+            }
             val body = if (stream == null) ByteArray(0) else stream.use { input ->
                 val output = ByteArrayOutputStream()
                 val buffer = ByteArray(1024)
