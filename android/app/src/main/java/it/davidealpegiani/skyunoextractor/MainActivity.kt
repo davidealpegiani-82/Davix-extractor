@@ -2950,6 +2950,7 @@ class MainActivity : FragmentActivity() {
         }
         restoreExecutor.execute {
             var legacySelectionReset = false
+            var archiveNeedsEncryption = false
             val restored = runCatching {
                 val state = channelLibraryAtomicFile().openRead().bufferedReader(StandardCharsets.UTF_8).use {
                     JSONObject(it.readText())
