@@ -41,7 +41,12 @@ internal object IptvSourceSettings {
     }
 
     /** Imports only the MandraKodi values needed for its documented HTTP User-Agent. */
-    fun saveMandraKodiCredentials(context: Context, password: String, deviceId: String) {
+    fun saveMandraKodiCredentials(
+        context: Context,
+        password: String,
+        deviceId: String = mandraKodiDeviceId(context).takeIf { it.matches(Regex("[A-Za-z0-9]{6}")) }
+            ?: generateMandraKodiDeviceId()
+    ) {
         val cleanPassword = password.trim()
         val cleanDeviceId = deviceId.trim().uppercase()
         require(cleanPassword.isNotBlank() && cleanPassword.length <= 512 && cleanPassword.all { it.code in 0x20..0x7E }) {
@@ -88,6 +93,12 @@ internal object IptvSourceSettings {
             require(!uri.host.isNullOrBlank()) { "L'indirizzo $label non è valido." }
         }
         return value
+    }
+
+    private fun generateMandraKodiDeviceId(): String {
+        val chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+        val random = java.security.SecureRandom()
+        return (1..6).map { chars[random.nextInt(chars.length)] }.joinToString("")
     }
 
     private fun encrypt(value: String): String {
