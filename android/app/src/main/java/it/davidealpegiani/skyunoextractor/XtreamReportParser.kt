@@ -28,7 +28,7 @@ internal data class XtreamReportSource(
         appendLine("Live categories: ${liveCategories.size}")
         appendLine("VOD categories: ${vodCategories.size}")
         appendLine("Series categories: ${seriesCategories.size}")
-        epgUrl?.let { appendLine("EPG: ${redactUrl(it)}") }
+        epgUrl?.let { appendLine("EPG: ${redactSensitiveUrl(it)}") }
     }
 }
 
@@ -170,13 +170,16 @@ internal object XtreamReportParser {
     private fun normalizeLabel(value: String): String =
         value.lowercase(Locale.ROOT).replace(Regex("""[^a-z0-9]+"""), " ").trim()
 
-    private fun redactUrl(value: String): String = runCatching {
-        val uri = URI(value)
-        val query = uri.rawQuery.orEmpty().split('&').filterNot {
-            it.substringBefore('=').equals("username", true) ||
-                it.substringBefore('=').equals("password", true) ||
-                it.substringBefore('=').equals("token", true)
-        }.joinToString("&")
-        URI(uri.scheme, uri.rawAuthority, uri.rawPath, query.ifBlank { null }, null).toString()
-    }.getOrDefault("[URL REDACTED]")
+
 }
+
+
+private fun redactSensitiveUrl(value: String): String = runCatching {
+    val uri = URI(value)
+    val query = uri.rawQuery.orEmpty().split('&').filterNot {
+        it.substringBefore('=').equals("username", true) ||
+            it.substringBefore('=').equals("password", true) ||
+            it.substringBefore('=').equals("token", true)
+    }.joinToString("&")
+    URI(uri.scheme, uri.rawAuthority, uri.rawPath, query.ifBlank { null }, null).toString()
+}.getOrDefault("[URL REDACTED]")
