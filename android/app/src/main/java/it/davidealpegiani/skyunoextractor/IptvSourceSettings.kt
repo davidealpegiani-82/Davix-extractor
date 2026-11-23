@@ -33,6 +33,15 @@ internal object IptvSourceSettings {
     fun mandraKodiDeviceId(context: Context): String = read(context, MANDRAKODI_DEVICE_ID).orEmpty()
     fun mandraKodiAddonVersion(context: Context): String = read(context, MANDRAKODI_ADDON_VERSION).orEmpty().ifBlank { DEFAULT_MANDRAKODI_ADDON_VERSION }
 
+    /** Encrypts sensitive channel URLs before writing them to the local catalog archive. */
+    fun protectLocalValue(value: String): String = "enc:v1:" + encrypt(value)
+
+    /** Reads both the new encrypted representation and legacy plaintext archive values. */
+    fun unprotectLocalValue(value: String): String? {
+        if (!value.startsWith("enc:v1:")) return value
+        return runCatching { decrypt(value.removePrefix("enc:v1:")) }.getOrNull()
+    }
+
     fun saveXtreamSource(context: Context, source: XtreamReportSource) {
         val base = validate(source.baseUrl, "server Xtream")
         require(source.username.isNotBlank() && source.username.length <= 512)
@@ -132,13 +141,15 @@ internal object IptvSourceSettings {
     private fun read(context: Context, name: String): String? {
         val packedValue = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getString(name, null) ?: return null
-        return runCatching {
-            val packed = Base64.decode(packedValue, Base64.NO_WRAP)
-            require(packed.size > 12)
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, packed.copyOfRange(0, 12)))
-            String(cipher.doFinal(packed.copyOfRange(12, packed.size)), StandardCharsets.UTF_8)
-        }.getOrNull()
+        return runCatching { decrypt(packedValue) }.getOrNull()
+    }
+
+    private fun decrypt(value: String): String {
+        val packed = Base64.decode(value, Base64.NO_WRAP)
+        require(packed.size > 12)
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, packed.copyOfRange(0, 12)))
+        return String(cipher.doFinal(packed.copyOfRange(12, packed.size)), StandardCharsets.UTF_8)
     }
 
     private fun key(): SecretKey {
