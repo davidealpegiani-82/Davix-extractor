@@ -1230,9 +1230,19 @@ class MainActivity : FragmentActivity() {
             .setTitle("Importazione automatica Xtream")
             .setView(content)
             .setNegativeButton("Annulla", null)
+            .setNeutralButton("Aggiorna sorgente salvata", null)
             .setPositiveButton("Analizza e importa", null)
             .create()
         dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                val savedSource = IptvSourceSettings.xtreamSource(this)
+                if (savedSource == null) {
+                    toast("Non è ancora presente una sorgente Xtream salvata.")
+                    return@setOnClickListener
+                }
+                dialog.dismiss()
+                startXtreamAutomaticImport(savedSource)
+            }
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val source = try {
                     XtreamReportParser.parse(reportInput.text.toString())
