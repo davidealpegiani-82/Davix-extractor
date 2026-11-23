@@ -58,8 +58,9 @@ internal class XtreamCatalogClient(
 
         progress("Recupero canali Live…")
         val live = getJsonArray(apiUrl("get_live_streams"))
-        live.forEach { item ->
-            val id = item.optString("stream_id").takeIf { it.isNotBlank() } ?: return@forEach
+        for (index in 0 until live.length()) {
+            val item = live.optJSONObject(index) ?: continue
+            val id = item.optString("stream_id").takeIf { it.isNotBlank() } ?: continue
             val name = item.optString("name").ifBlank { "Canale $id" }
             val category = categoryName(liveCategories, item.optString("category_id"), "Live")
             val ext = safeExtension(item.optString("container_extension"), "ts")
@@ -70,8 +71,9 @@ internal class XtreamCatalogClient(
 
         progress("Recupero film VOD…")
         val vod = getJsonArray(apiUrl("get_vod_streams"))
-        vod.forEach { item ->
-            val id = item.optString("stream_id").takeIf { it.isNotBlank() } ?: return@forEach
+        for (index in 0 until vod.length()) {
+            val item = vod.optJSONObject(index) ?: continue
+            val id = item.optString("stream_id").takeIf { it.isNotBlank() } ?: continue
             val name = item.optString("name").ifBlank { "Film $id" }
             val category = categoryName(vodCategories, item.optString("category_id"), "Film")
             val ext = safeExtension(item.optString("container_extension"), "mp4")
@@ -82,8 +84,9 @@ internal class XtreamCatalogClient(
 
         progress("Recupero elenco serie…")
         val series = getJsonArray(apiUrl("get_series"))
-        series.forEachIndexed { index, item ->
-            val seriesId = item.optString("series_id").takeIf { it.isNotBlank() } ?: return@forEachIndexed
+        for (index in 0 until series.length()) {
+            val item = series.optJSONObject(index) ?: continue
+            val seriesId = item.optString("series_id").takeIf { it.isNotBlank() } ?: continue
             val seriesName = item.optString("name").ifBlank { "Serie $seriesId" }
             val category = categoryName(seriesCategories, item.optString("category_id"), "Serie TV")
             progress("Analisi episodi · ${index + 1}/${series.length()} · $seriesName")
@@ -92,7 +95,7 @@ internal class XtreamCatalogClient(
                 val episodes = info.optJSONObject("episodes")
                 if (episodes == null) {
                     skippedSeries++
-                    return@forEachIndexed
+                    continue
                 }
                 val seasonKeys = episodes.keys().asSequence().toList().sortedBy { it.toIntOrNull() ?: Int.MAX_VALUE }
                 var foundForSeries = 0
@@ -127,7 +130,9 @@ internal class XtreamCatalogClient(
 
     private fun categoryMap(action: String): Map<String, String> {
         val result = LinkedHashMap<String, String>()
-        getJsonArray(apiUrl(action)).forEach { item ->
+        val categories = getJsonArray(apiUrl(action))
+        for (index in 0 until categories.length()) {
+            val item = categories.optJSONObject(index) ?: continue
             val id = item.optString("category_id")
             val name = item.optString("category_name")
             if (id.isNotBlank() && name.isNotBlank()) result[id] = name
