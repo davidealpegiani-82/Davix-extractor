@@ -1506,7 +1506,7 @@ class MainActivity : FragmentActivity() {
                         JSONObject()
                             .put("id", "channel-$index")
                             .put("name", channel.name)
-                            .put("url", channel.url)
+                            .put("url", IptvSourceSettings.protectLocalValue(channel.url))
                             .put("logo", channel.logo)
                             .put("category", channel.category)
                             .put("tvgId", channel.tvgId)
@@ -2901,7 +2901,7 @@ class MainActivity : FragmentActivity() {
                         val expanded = JSONArray().apply { expandedSnapshot.forEach { put(it) } }
                         val state = JSONObject().apply {
                             // Versione 2: conserva in modo esplicito la selezione di pubblicazione.
-                            put("version", 2)
+                            put("version", 3)
                             put("channels", savedChannels)
                             put("expandedCategories", expanded)
                             put("savedAt", savedAt)
@@ -2961,7 +2961,9 @@ class MainActivity : FragmentActivity() {
                 for (i in 0 until savedChannels.length()) {
                     val item = savedChannels.optJSONObject(i) ?: continue
                     val name = item.optString("name").trim()
-                    val url = item.optString("url").trim()
+                    val storedUrl = item.optString("url").trim()
+                    if (!storedUrl.startsWith("enc:v1:")) archiveNeedsEncryption = true
+                    val url = IptvSourceSettings.unprotectLocalValue(storedUrl)?.trim().orEmpty()
                     if (name.isBlank() || !(url.startsWith("https://", true) || url.startsWith("http://", true))) continue
                     val category = normalizeCategoryPath(item.optString("category", "Non classificati"))
                         .ifBlank { "Non classificati" }
@@ -2994,7 +2996,7 @@ class MainActivity : FragmentActivity() {
                     renderSavedPlaylists()
                     // Migrazione una tantum: gli archivi precedenti partivano tutti selezionati.
                     // Dalla versione 2 in poi lo stato scelto dall'utente viene mantenuto.
-                    if (legacySelectionReset) persistChannelLibrary()
+                    if (legacySelectionReset || archiveNeedsEncryption) persistChannelLibrary()
                     if (channels.isEmpty()) restoreMostRecentSavedPlaylist()
                 }.onFailure {
                     // Non cancellare o sovrascrivere un archivio illeggibile: serve per diagnosi e recupero.
