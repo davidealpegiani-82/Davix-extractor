@@ -1,0 +1,31 @@
+name: Validate free Italian TV catalog
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "catalogs/it/**"
+      - "scripts/validate-free-catalog.mjs"
+      - ".github/workflows/free-catalog-check.yml"
+  pull_request:
+    paths:
+      - "catalogs/it/**"
+      - "scripts/validate-free-catalog.mjs"
+      - ".github/workflows/free-catalog-check.yml"
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Validate catalog schema, access labels and official HTTPS hosts
+        run: node scripts/validate-free-catalog.mjs
