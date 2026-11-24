@@ -1088,6 +1088,80 @@ class MainActivity : Activity() {
             }
         }
 
+    private fun openLocalPlaylistPicker() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf(
+                "application/x-mpegURL",
+                "application/vnd.apple.mpegurl",
+                "audio/x-mpegurl",
+                "text/plain",
+                "application/octet-stream"
+            ))
+        }
+        startActivityForResult(intent, PICK_LOCAL_PLAYLIST)
+    }
+
+    private fun importLocalPlaylist(uri: Uri) {
+        importPlaylistButton.isEnabled = false
+        cloudStatusView.text = "Importazione playlist locale in corso…"
+        cloudExecutor.execute {
+            try {
+                val input = contentResolver.openInputStream(uri)
+                    ?: throw IOException("Impossibile aprire il file selezionato.")
+                val text = input.use { stream ->
+                    val output = java.io.ByteArrayOutputStream()
+                    val buffer = ByteArray(16 * 1024)
+                    var total = 0L
+                    while (true) {
+                        val count = stream.read(buffer)
+                        if (count < 0) break
+                        total += count
+                        if (total > 32L * 1024L * 1024L) throw IOException("La playlist supera il limite di 32 MB.")
+                        output.write(buffer, 0, count)
+                    }
+                    String(output.toByteArray(), Charsets.UTF_8)
+                }
+                val imported = LocalPlaylistParser.parse(text)
+                LocalPlaylistStore.save(this, imported)
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    localMode = true
+                    cloudChannels.clear()
+                    cloudChannels.addAll(imported)
+                    cloudCategories.clear()
+                    cloudCategories.addAll(imported.map { it.category.trim() }
+                        .filter { it.isNotBlank() && !it.equals("Non classificati", true) }.distinct())
+                    favoriteUrls.clear()
+                    favoriteUrls.addAll(playerPrefs.getStringSet("favorite_urls", emptySet()).orEmpty())
+                    selectedSourceByGroup.clear()
+                    renderCloudChannels()
+                    channelsHeaderView.visibility = View.VISIBLE
+                    diagnosticsView.visibility = View.VISIBLE
+                    importPlaylistButton.text = "↻  SOSTITUISCI PLAYLIST M3U"
+                    cloudStatusView.text = "Playlist locale caricata · ${imported.size} canali · nessun account richiesto."
+                    importPlaylistButton.isEnabled = true
+                    refreshEpgIfNeeded(force = true)
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        cloudStatusView.text = "Importazione non riuscita: ${error.message ?: "file non valido"}"
+                    }
+                    importPlaylistButton.isEnabled = true
+                }
+            }
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == PICK_LOCAL_PLAYLIST && resultCode == RESULT_OK) {
+            data?.data?.let(::importLocalPlaylist)
+        }
+    }
+
     private fun beginCloudPairing() {
         val code = activationCodeInput.text.toString().trim().uppercase()
         if (!code.matches(Regex("[A-HJ-NP-Z2-9]{10}"))) {
