@@ -437,6 +437,7 @@ class MainActivity : Activity() {
         controls.addView(cloudStatusView)
         activationCodeInput.visibility = View.GONE
         cloudStatusView.isClickable = true
+        cloudStatusView.isFocusable = true
         cloudStatusView.setOnClickListener {
             activationCodeInput.visibility = if (activationCodeInput.visibility == View.VISIBLE) View.GONE else View.VISIBLE
             if (activationCodeInput.visibility == View.VISIBLE) activationCodeInput.requestFocus()
