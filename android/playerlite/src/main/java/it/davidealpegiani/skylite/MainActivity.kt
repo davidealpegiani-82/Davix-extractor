@@ -349,6 +349,24 @@ class MainActivity : Activity() {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
         ).apply { setMargins(dp(12), dp(8), dp(12), dp(4)) })
 
+        importPlaylistButton = TextView(this).apply {
+            text = "＋  IMPORTA PLAYLIST M3U"
+            contentDescription = "Importa una playlist locale senza account o sincronizzazione cloud"
+            textSize = if (tvMode) 10f else 13f
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setPadding(dp(8), dp(11), dp(8), dp(11))
+            isClickable = true
+            isFocusable = true
+            setBackground(channelActionBackground())
+            setOnFocusChangeListener { _, focused -> background = channelActionBackground(focused) }
+            setOnClickListener { openLocalPlaylistPicker() }
+        }
+        controls.addView(importPlaylistButton, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply { setMargins(dp(12), dp(4), dp(12), dp(4)) })
+
         cloudHeaderView = TextView(this).apply {
             text = "☁  SINCRONIZZAZIONE CLOUD"
             setTextColor(Color.rgb(112, 196, 220))
@@ -417,6 +435,12 @@ class MainActivity : Activity() {
             setPadding(dp(8), dp(4), dp(8), dp(6))
         }
         controls.addView(cloudStatusView)
+        activationCodeInput.visibility = View.GONE
+        cloudStatusView.isClickable = true
+        cloudStatusView.setOnClickListener {
+            activationCodeInput.visibility = if (activationCodeInput.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+            if (activationCodeInput.visibility == View.VISIBLE) activationCodeInput.requestFocus()
+        }
         epgStatusView = TextView(this).apply {
             text = "EPG: in attesa di caricamento"
             setTextColor(Color.rgb(126, 190, 218))
