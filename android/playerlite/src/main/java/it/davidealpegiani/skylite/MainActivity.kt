@@ -2,6 +2,7 @@ package it.davidealpegiani.skylite
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.Intent
 import android.graphics.Color
 import android.content.res.Configuration
 import android.os.Build
@@ -48,6 +49,7 @@ import org.json.JSONObject
 
 @UnstableApi
 class MainActivity : Activity() {
+    private val PICK_LOCAL_PLAYLIST = 4201
     private var player: ExoPlayer? = null
     private var mediaSession: MediaSession? = null
     private var resumeAfterBackground = false
@@ -61,6 +63,8 @@ class MainActivity : Activity() {
     private lateinit var fullscreenChannelDrawer: LinearLayout
     private lateinit var fullscreenChannelList: LinearLayout
     private var isChannelDrawerOpen = false
+    private var localMode = false
+    private lateinit var importPlaylistButton: TextView
     private var isFullscreen = false
     private var fullscreenOverlayVisible = false
     private var focusBeforeFullscreen: View? = null
