@@ -124,7 +124,7 @@
     {
       "id": "now",
       "name": "NOW",
-      "provider": "Sky Italia",
+      "provider": "NOW",
       "access": "subscription",
       "accountRequired": true,
       "categories": [
