@@ -17,21 +17,12 @@ internal object IptvSourceSettings {
     private const val KEY_ALIAS = "davix_iptv_sources_aes_v1"
     private const val PLAYLIST = "playlist_url"
     private const val EPG = "epg_url"
-    private const val MANDRAKODI = "mandrakodi_catalog_url"
-    private const val MANDRAKODI_PASSWORD = "mandrakodi_password"
-    private const val MANDRAKODI_DEVICE_ID = "mandrakodi_device_id"
-    private const val MANDRAKODI_ADDON_VERSION = "mandrakodi_addon_version"
-    private const val DEFAULT_MANDRAKODI_ADDON_VERSION = "2.2.1"
     private const val XTREAM_BASE = "xtream_base"
     private const val XTREAM_USERNAME = "xtream_username"
     private const val XTREAM_PASSWORD = "xtream_password"
 
     fun playlistUrl(context: Context): String = read(context, PLAYLIST).orEmpty()
     fun epgUrl(context: Context): String = read(context, EPG).orEmpty()
-    fun mandraKodiUrl(context: Context): String = read(context, MANDRAKODI).orEmpty()
-    fun mandraKodiPassword(context: Context): String = read(context, MANDRAKODI_PASSWORD).orEmpty()
-    fun mandraKodiDeviceId(context: Context): String = read(context, MANDRAKODI_DEVICE_ID).orEmpty()
-    fun mandraKodiAddonVersion(context: Context): String = read(context, MANDRAKODI_ADDON_VERSION).orEmpty().ifBlank { DEFAULT_MANDRAKODI_ADDON_VERSION }
 
     /** Encrypts sensitive channel URLs before writing them to the local catalog archive. */
     fun protectLocalValue(value: String): String = "enc:v1:" + encrypt(value)
@@ -62,55 +53,13 @@ internal object IptvSourceSettings {
         return XtreamReportSource(base, username, password, emptyList(), emptyList(), emptyList(), null)
     }
 
-    fun saveMandraKodiAddonVersion(context: Context, version: String) {
-        val clean = version.trim()
-        require(clean.matches(Regex("[A-Za-z0-9._-]{1,32}"))) {
-            "Versione add-on MandraKodi non valida."
-        }
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putString(MANDRAKODI_ADDON_VERSION, encrypt(clean))
-            .apply()
-    }
-
-    /** Imports only the MandraKodi values needed for its documented HTTP User-Agent. */
-    fun saveMandraKodiCredentials(
-        context: Context,
-        password: String,
-        deviceId: String = mandraKodiDeviceId(context).takeIf { it.matches(Regex("[A-Za-z0-9]{6}")) }
-            ?: generateMandraKodiDeviceId()
-    ) {
-        val cleanPassword = password.trim()
-        val cleanDeviceId = deviceId.trim().uppercase()
-        require(cleanPassword.isNotBlank() && cleanPassword.length <= 512 && cleanPassword.all { it.code in 0x20..0x7E }) {
-            "Nel file Kodi non è stata trovata una password MandraKodi valida."
-        }
-        require(cleanDeviceId.matches(Regex("[A-Z0-9]{6}"))) {
-            "L'identificativo MandraKodi deve contenere 6 caratteri."
-        }
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putString(MANDRAKODI_PASSWORD, encrypt(cleanPassword))
-            .putString(MANDRAKODI_DEVICE_ID, encrypt(cleanDeviceId))
-            .apply()
-    }
-
-    fun mandraKodiUserAgent(context: Context): String {
-        val password = mandraKodiPassword(context)
-        val deviceId = mandraKodiDeviceId(context)
-        require(password.isNotBlank() && deviceId.matches(Regex("[A-Z0-9]{6}"))) {
-            "Importa prima le impostazioni MandraKodi da Kodi."
-        }
-        return "MandraKodi2@@${mandraKodiAddonVersion(context)}@@$password@@$deviceId"
-    }
-
-    fun save(context: Context, playlistUrl: String, epgUrl: String, mandraKodiCatalogUrl: String = mandraKodiUrl(context)) {
+    fun save(context: Context, playlistUrl: String, epgUrl: String) {
         val playlist = validate(playlistUrl, "M3U")
         val epg = validate(epgUrl, "XMLTV")
-        val mandraKodi = validate(mandraKodiCatalogUrl, "catalogo MandraKodi")
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         prefs.edit()
             .putString(PLAYLIST, playlist.takeIf { it.isNotBlank() }?.let(::encrypt))
             .putString(EPG, epg.takeIf { it.isNotBlank() }?.let(::encrypt))
-            .putString(MANDRAKODI, mandraKodi.takeIf { it.isNotBlank() }?.let(::encrypt))
             .apply()
     }
 
@@ -125,12 +74,6 @@ internal object IptvSourceSettings {
             require(!uri.host.isNullOrBlank()) { "L'indirizzo $label non è valido." }
         }
         return value
-    }
-
-    private fun generateMandraKodiDeviceId(): String {
-        val chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-        val random = java.security.SecureRandom()
-        return (1..6).map { chars[random.nextInt(chars.length)] }.joinToString("")
     }
 
     private fun encrypt(value: String): String {
