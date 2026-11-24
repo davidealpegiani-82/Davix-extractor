@@ -1,0 +1,141 @@
+{
+  "schemaVersion": 1,
+  "country": "IT",
+  "language": "it",
+  "updatedAt": "2026-11-24",
+  "policy": "official-platforms-only",
+  "services": [
+    {
+      "id": "rai-play",
+      "name": "RaiPlay",
+      "provider": "Rai",
+      "access": "free",
+      "accountRequired": false,
+      "categories": [
+        "general",
+        "news",
+        "cinema",
+        "culture",
+        "sport",
+        "kids"
+      ],
+      "liveUrl": "https://www.raiplay.it/dirette",
+      "homeUrl": "https://www.raiplay.it/",
+      "notes": "Dirette e contenuti gratuiti pubblicati dall'emittente. Disponibilità e catalogo dipendono dai diritti."
+    },
+    {
+      "id": "mediaset-infinity",
+      "name": "Mediaset Infinity",
+      "provider": "RTI",
+      "access": "free-with-account",
+      "accountRequired": true,
+      "categories": [
+        "general",
+        "entertainment",
+        "cinema",
+        "news",
+        "kids"
+      ],
+      "liveUrl": "https://mediasetinfinity.mediaset.it/diretta",
+      "homeUrl": "https://mediasetinfinity.mediaset.it/",
+      "notes": "Selezione gratuita con pubblicità e account; alcuni contenuti sono a pagamento."
+    },
+    {
+      "id": "la7-live",
+      "name": "La7",
+      "provider": "Cairo Communication",
+      "access": "free",
+      "accountRequired": false,
+      "categories": [
+        "general",
+        "news",
+        "talk"
+      ],
+      "liveUrl": "https://www.la7.it/dirette",
+      "homeUrl": "https://www.la7.it/",
+      "notes": "Diretta ufficiale; disponibilità soggetta a diritti e geoblocchi."
+    },
+    {
+      "id": "pluto-tv",
+      "name": "Pluto TV",
+      "provider": "Paramount",
+      "access": "free-with-ads",
+      "accountRequired": false,
+      "categories": [
+        "entertainment",
+        "cinema",
+        "series",
+        "documentary",
+        "kids",
+        "music"
+      ],
+      "liveUrl": "https://pluto.tv/it/live-tv",
+      "homeUrl": "https://pluto.tv/it/",
+      "notes": "Canali FAST gratuiti con pubblicità; catalogo variabile per territorio."
+    },
+    {
+      "id": "samsung-tv-plus",
+      "name": "Samsung TV Plus",
+      "provider": "Samsung",
+      "access": "free-on-supported-devices",
+      "accountRequired": false,
+      "categories": [
+        "entertainment",
+        "cinema",
+        "news",
+        "sport",
+        "documentary",
+        "kids"
+      ],
+      "liveUrl": "https://www.samsungtvplus.com/",
+      "homeUrl": "https://www.samsungtvplus.com/",
+      "notes": "Servizio gratuito disponibile solo su dispositivi e territori supportati."
+    },
+    {
+      "id": "lg-channels",
+      "name": "LG Channels",
+      "provider": "LG",
+      "access": "free-on-supported-devices",
+      "accountRequired": false,
+      "categories": [
+        "entertainment",
+        "cinema",
+        "news",
+        "sport",
+        "documentary"
+      ],
+      "liveUrl": "https://www.lg.com/it/lg-channels",
+      "homeUrl": "https://www.lg.com/it/",
+      "notes": "Canali FAST gratuiti su modelli e territori compatibili."
+    },
+    {
+      "id": "dazn",
+      "name": "DAZN",
+      "provider": "DAZN",
+      "access": "mixed-free-and-subscription",
+      "accountRequired": true,
+      "categories": [
+        "sport"
+      ],
+      "liveUrl": "https://www.dazn.com/it-IT/home",
+      "homeUrl": "https://www.dazn.com/it-IT/home",
+      "notes": "Accesso ufficiale. Alcuni contenuti possono essere gratuiti; eventi premium richiedono un abbonamento valido."
+    },
+    {
+      "id": "now",
+      "name": "NOW",
+      "provider": "Sky Italia",
+      "access": "subscription",
+      "accountRequired": true,
+      "categories": [
+        "cinema",
+        "series",
+        "entertainment",
+        "sport"
+      ],
+      "liveUrl": "https://www.nowtv.it/",
+      "homeUrl": "https://www.nowtv.it/",
+      "notes": "Servizio ufficiale in abbonamento; nessun flusso premium viene incorporato o redistribuito da DAVIX."
+    }
+  ]
+}
