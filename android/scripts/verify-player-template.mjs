@@ -155,11 +155,15 @@ assert.match(lite, /PlayerCloudSync\.hasValidLease\(this\)/, 'Player Lite must e
 assert.match(lite, /PlayerCloudSync\.clearAuthorization\(this\)/, 'Player Lite must clear local authorization after revocation');
 assert.doesNotMatch(lite, /PlayerCloudSync\.pairingStatus|startPairing\(this\)/, 'legacy pairing flow must be removed');
 assert.match(lite, /hint = "Codice monouso generato da Admin"/, 'Player Lite activation must request an Admin-generated one-time code');
-assert.match(lite, /Nessun canale visibile\. Inserisci il codice monouso fornito da Admin/, 'locked empty state must refer to Admin');
-assert.match(lite, /Accesso bloccato: inserisci un codice monouso generato da Admin/, 'locked status must refer to Admin');
-assert.match(lite, /setOnEditorActionListener[\s\S]*?beginCloudPairing\(\)/, 'activation code must submit from the TV keyboard without a visible button');
-assert.doesNotMatch(lite, /controls\.addView\(cloudHeaderView\)|controls\.addView\(endpointInput|controls\.addView\(pairButton/, 'Player Lite must not expose Cloud URL or activation button');
-assert.match(lite, /diagnosticsView\.visibility = View\.GONE/, 'HLS diagnostics must stay hidden until device activation');
+assert.match(lite, /Nessuna playlist caricata\\. Importa un file M3U dal dispositivo/, 'empty state must guide the user to local playlist import');
+assert.match(lite, /Modalità locale gratuita/, 'Player Lite must expose a free local mode without account activation');
+assert.match(lite, /IMPORTA PLAYLIST M3U[\\s\\S]*?openLocalPlaylistPicker\\(\\)/, 'Player Lite must expose local M3U import');
+assert.match(lite, /LocalPlaylistParser\\.parse\\(text\\)/, 'Player Lite must parse imported playlists locally');
+assert.match(lite, /LocalPlaylistStore\\.save\\(this, imported\\)/, 'Player Lite must persist local playlists');
+assert.match(lite, /if \\(!PlayerCloudSync\\.hasValidLease\\(this\\)\\) \\{[\\s\\S]*?loadLocalPlaylist\\(\\)/, 'Player Lite must fall back to local playlists without a cloud lease');
+assert.match(lite, /setOnEditorActionListener[\\s\\S]*?beginCloudPairing\\(\\)/, 'optional Cloud activation code must submit from the TV keyboard');
+assert.doesNotMatch(lite, /Accesso bloccato: inserisci un codice monouso generato da Admin/, 'Cloud activation must not be a mandatory startup gate');
+assert.match(lite, /diagnosticsView\\.visibility = if \\(saved\\.isNotEmpty\\(\\)\\) View\\.VISIBLE else View\\.GONE/, 'local playback diagnostics must appear when a local playlist is loaded');
 
 
 assert.match(lite, /override fun dispatchKeyEvent\(event: (?:android\.view\.)?KeyEvent\): Boolean/, 'Player Lite must handle Android TV remote key events');
