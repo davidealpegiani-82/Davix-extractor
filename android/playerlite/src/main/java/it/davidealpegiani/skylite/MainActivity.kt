@@ -74,7 +74,7 @@ class MainActivity : Activity() {
         override fun run() {
             val current = player
             if (current == null || !::diagnosticsView.isInitialized || isFinishing || isDestroyed) return
-            if (!PlayerCloudSync.hasValidLease(this@MainActivity) && current.mediaItemCount > 0) {
+            if (!PlayerCloudSync.hasValidLease(this@MainActivity) && !localMode && current.mediaItemCount > 0) {
                 PlayerCloudSync.clearAuthorization(this@MainActivity)
                 stopPlaybackForAuthorization()
                 cloudChannels.clear()
@@ -595,7 +595,7 @@ class MainActivity : Activity() {
             channelsHeaderView.visibility = View.VISIBLE
             diagnosticsView.visibility = View.VISIBLE
         }
-        if (tvMode && cloudChannels.isEmpty() && !PlayerCloudSync.hasValidLease(this)) activationCodeInput.post { activationCodeInput.requestFocus() }
+        if (tvMode && cloudChannels.isEmpty()) importPlaylistButton.post { importPlaylistButton.requestFocus() }
     }
 
     private fun isTvDevice(): Boolean {
@@ -1195,17 +1195,20 @@ class MainActivity : Activity() {
         lastAuthorizationCheckAt = System.currentTimeMillis()
         if (!PlayerCloudSync.hasValidLease(this)) {
             PlayerCloudSync.clearAuthorization(this)
-            cloudChannels.clear()
-            renderCloudChannels()
-            stopPlaybackForAuthorization()
+            if (!localMode) {
+                loadLocalPlaylist()
+                if (!localMode) stopPlaybackForAuthorization()
+            }
             endpointInput.visibility = View.GONE
-            activationCodeInput.visibility = View.VISIBLE
+            activationCodeInput.visibility = View.GONE
             pairButton.visibility = View.GONE
-            diagnosticsView.visibility = View.GONE
-            channelsHeaderView.visibility = View.GONE
-            pairButton.isEnabled = true
-            pairButton.text = "ATTIVA QUESTO DISPOSITIVO"
-            cloudStatusView.text = "Accesso bloccato: inserisci un codice monouso generato da Admin"
+            channelsHeaderView.visibility = if (localMode) View.VISIBLE else View.GONE
+            diagnosticsView.visibility = if (localMode) View.VISIBLE else View.GONE
+            cloudStatusView.text = if (localMode) {
+                "Modalità locale gratuita · sincronizzazione cloud facoltativa. Tocca qui per inserire un codice."
+            } else {
+                "Modalità locale gratuita · importa una playlist M3U. Tocca qui solo se vuoi configurare il cloud."
+            }
             return
         }
         cloudStatusView.text = "Controllo aggiornamenti DAVIX Cloud Sync…"
@@ -1227,17 +1230,15 @@ class MainActivity : Activity() {
                     cloudStatusView.text = "Sincronizzazione non riuscita: ${e.message ?: "offline"}. Mantengo la lista salvata."
                     if (e.message?.contains("device_not_authorized") == true) {
                         PlayerCloudSync.clearAuthorization(this)
-                        cloudChannels.clear()
-                        renderCloudChannels()
+                        localMode = false
+                        loadLocalPlaylist()
                         stopPlaybackForAuthorization()
-                        endpointInput.visibility = View.GONE
-                        activationCodeInput.visibility = View.VISIBLE
-                        pairButton.visibility = View.GONE
-                        diagnosticsView.visibility = View.GONE
-                        channelsHeaderView.visibility = View.GONE
-                        pairButton.isEnabled = true
-                        pairButton.text = "ATTIVA QUESTO DISPOSITIVO"
-                        cloudStatusView.text = "Autorizzazione revocata. Inserisci un nuovo codice generato da Admin."
+                        activationCodeInput.visibility = View.GONE
+                        cloudStatusView.text = if (localMode) {
+                            "Cloud non disponibile: continuo con la playlist locale gratuita."
+                        } else {
+                            "Cloud non disponibile: importa una playlist locale gratuita."
+                        }
                     } else {
                         loadCachedChannels()
                         cloudStatusView.text = if (cloudChannels.isEmpty()) {
@@ -1952,11 +1953,6 @@ class MainActivity : Activity() {
     }
 
     private fun handlePlayIntent(intent: android.content.Intent?) {
-        if (!PlayerCloudSync.hasValidLease(this)) {
-            stopPlaybackForAuthorization()
-            cloudStatusView.text = "Accesso bloccato: attiva prima il dispositivo con un codice monouso."
-            return
-        }
         val uri = intent?.data
         val streamUrl = uri?.getQueryParameter("url")
             ?: intent?.getStringExtra("url")
@@ -1978,6 +1974,7 @@ class MainActivity : Activity() {
         // Se il canale viene aperto dal player HTML, riusa il contesto HTTP
         // del browser: il solo User-Agent del WebView non coincide necessariamente
         // con quello del browser che ha caricato la pagina.
+        if (!PlayerCloudSync.hasValidLease(this)) localMode = true
         val requestHeaders = mutableMapOf("Accept" to "*/*")
         val browserUa = uri?.getQueryParameter("ua")
             ?.takeIf { it.isNotBlank() && it.length <= 512 && !it.contains('\r') && !it.contains('\n') }
@@ -2050,12 +2047,12 @@ class MainActivity : Activity() {
         super.onStart()
         retryHandler.removeCallbacks(diagnosticsTask)
         retryHandler.post(diagnosticsTask)
-        if (resumeAfterBackground && (player?.mediaItemCount ?: 0) > 0 && PlayerCloudSync.hasValidLease(this)) {
+        if (resumeAfterBackground && (player?.mediaItemCount ?: 0) > 0 && (PlayerCloudSync.hasValidLease(this) || localMode)) {
             bufferingStartedAt = 0L
             lastPlaybackProgressAt = System.currentTimeMillis()
             lastObservedPositionMs = C.TIME_UNSET
             player?.playWhenReady = true
-        } else if (!PlayerCloudSync.hasValidLease(this)) {
+        } else if (!PlayerCloudSync.hasValidLease(this) && !localMode) {
             stopPlaybackForAuthorization()
         }
         resumeAfterBackground = false
