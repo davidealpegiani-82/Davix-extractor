@@ -429,7 +429,7 @@ class MainActivity : Activity() {
         }
         // L'attivazione si conferma dal campo codice (Invio/Fatto), senza pulsante dedicato.
         cloudStatusView = TextView(this).apply {
-            text = "Accesso bloccato: inserisci un codice monouso generato da Admin"
+            text = "Modalità locale gratuita · importa una playlist M3U. Nessun account necessario."
             setTextColor(Color.rgb(164, 202, 220))
             textSize = if (tvMode) 10f else 12f
             setPadding(dp(8), dp(4), dp(8), dp(6))
