@@ -618,9 +618,10 @@ class MainActivity : Activity() {
     private fun loadCachedChannels() {
         cloudChannels.clear()
         if (!PlayerCloudSync.hasValidLease(this)) {
-            renderCloudChannels()
+            loadLocalPlaylist()
             return
         }
+        localMode = false
         val config = PlayerCloudSync.cachedConfig(this)
         cloudCategories.clear()
         val categoryArray = config?.optJSONArray("categories") ?: JSONArray()
@@ -643,14 +644,46 @@ class MainActivity : Activity() {
         refreshEpgIfNeeded()
     }
 
+    private fun loadLocalPlaylist() {
+        val saved = runCatching { LocalPlaylistStore.load(this) }.getOrElse { error ->
+            cloudStatusView.text = "Archivio locale non leggibile: ${error.message ?: "errore"}"
+            emptyList()
+        }
+        cloudChannels.clear()
+        cloudChannels.addAll(saved)
+        localMode = saved.isNotEmpty()
+        cloudCategories.clear()
+        cloudCategories.addAll(saved.map { it.category.trim() }
+            .filter { it.isNotBlank() && !it.equals("Non classificati", true) }.distinct())
+        favoriteUrls.clear()
+        favoriteUrls.addAll(playerPrefs.getStringSet("favorite_urls", emptySet()).orEmpty())
+        selectedSourceByGroup.clear()
+        runCatching { JSONObject(playerPrefs.getString("selected_source_by_group", "{}") ?: "{}") }
+            .getOrNull()?.let { savedSources ->
+                savedSources.keys().forEach { key ->
+                    savedSources.optString(key).takeIf { it.isNotBlank() }?.let { selectedSourceByGroup[key] = it }
+                }
+            }
+        renderCloudChannels()
+        channelsHeaderView.visibility = if (saved.isNotEmpty()) View.VISIBLE else View.GONE
+        diagnosticsView.visibility = if (saved.isNotEmpty()) View.VISIBLE else View.GONE
+        importPlaylistButton.text = if (saved.isEmpty()) "＋  IMPORTA PLAYLIST M3U" else "↻  SOSTITUISCI PLAYLIST M3U"
+        if (saved.isNotEmpty()) {
+            cloudStatusView.text = "Modalità locale gratuita · ${saved.size} canali sul dispositivo. Tocca qui per opzioni cloud facoltative."
+            refreshEpgIfNeeded()
+        } else {
+            cloudStatusView.text = "Modalità locale gratuita · importa una playlist M3U. Nessun account necessario."
+        }
+    }
+
     private fun renderCloudChannels() {
         if (!::channelsList.isInitialized) return
         channelsList.removeAllViews()
         updateStickyCategoryHeader()
         if (cloudChannels.isEmpty()) {
-            if (isTvDevice() && !PlayerCloudSync.hasValidLease(this)) activationCodeInput.post { activationCodeInput.requestFocus() }
+            if (isTvDevice()) importPlaylistButton.post { importPlaylistButton.requestFocus() }
             val empty = TextView(this).apply {
-                text = "Nessun canale visibile. Inserisci il codice monouso fornito da Admin per attivare il dispositivo."
+                text = "Nessuna playlist caricata. Importa un file M3U dal dispositivo. Non serve un account né una licenza."
                 setTextColor(Color.rgb(164, 181, 202))
                 textSize = if (isTvDevice()) 16f else 14f
                 includeFontPadding = true
