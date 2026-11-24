@@ -2,6 +2,7 @@ package it.davidealpegiani.skylite
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.Intent
 import android.graphics.Color
 import android.content.res.Configuration
 import android.os.Build
@@ -48,6 +49,7 @@ import org.json.JSONObject
 
 @UnstableApi
 class MainActivity : Activity() {
+    private val PICK_LOCAL_PLAYLIST = 4201
     private var player: ExoPlayer? = null
     private var mediaSession: MediaSession? = null
     private var resumeAfterBackground = false
@@ -61,6 +63,8 @@ class MainActivity : Activity() {
     private lateinit var fullscreenChannelDrawer: LinearLayout
     private lateinit var fullscreenChannelList: LinearLayout
     private var isChannelDrawerOpen = false
+    private var localMode = false
+    private lateinit var importPlaylistButton: TextView
     private var isFullscreen = false
     private var fullscreenOverlayVisible = false
     private var focusBeforeFullscreen: View? = null
@@ -70,7 +74,7 @@ class MainActivity : Activity() {
         override fun run() {
             val current = player
             if (current == null || !::diagnosticsView.isInitialized || isFinishing || isDestroyed) return
-            if (!PlayerCloudSync.hasValidLease(this@MainActivity) && current.mediaItemCount > 0) {
+            if (!PlayerCloudSync.hasValidLease(this@MainActivity) && !localMode && current.mediaItemCount > 0) {
                 PlayerCloudSync.clearAuthorization(this@MainActivity)
                 stopPlaybackForAuthorization()
                 cloudChannels.clear()
@@ -345,6 +349,24 @@ class MainActivity : Activity() {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
         ).apply { setMargins(dp(12), dp(8), dp(12), dp(4)) })
 
+        importPlaylistButton = TextView(this).apply {
+            text = "＋  IMPORTA PLAYLIST M3U"
+            contentDescription = "Importa una playlist locale senza account o sincronizzazione cloud"
+            textSize = if (tvMode) 10f else 13f
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setPadding(dp(8), dp(11), dp(8), dp(11))
+            isClickable = true
+            isFocusable = true
+            setBackground(channelActionBackground())
+            setOnFocusChangeListener { _, focused -> background = channelActionBackground(focused) }
+            setOnClickListener { openLocalPlaylistPicker() }
+        }
+        controls.addView(importPlaylistButton, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply { setMargins(dp(12), dp(4), dp(12), dp(4)) })
+
         cloudHeaderView = TextView(this).apply {
             text = "☁  SINCRONIZZAZIONE CLOUD"
             setTextColor(Color.rgb(112, 196, 220))
@@ -407,12 +429,19 @@ class MainActivity : Activity() {
         }
         // L'attivazione si conferma dal campo codice (Invio/Fatto), senza pulsante dedicato.
         cloudStatusView = TextView(this).apply {
-            text = "Accesso bloccato: inserisci un codice monouso generato da Admin"
+            text = "Modalità locale gratuita · importa una playlist M3U. Nessun account necessario."
             setTextColor(Color.rgb(164, 202, 220))
             textSize = if (tvMode) 10f else 12f
             setPadding(dp(8), dp(4), dp(8), dp(6))
         }
         controls.addView(cloudStatusView)
+        activationCodeInput.visibility = View.GONE
+        cloudStatusView.isClickable = true
+        cloudStatusView.isFocusable = true
+        cloudStatusView.setOnClickListener {
+            activationCodeInput.visibility = if (activationCodeInput.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+            if (activationCodeInput.visibility == View.VISIBLE) activationCodeInput.requestFocus()
+        }
         epgStatusView = TextView(this).apply {
             text = "EPG: in attesa di caricamento"
             setTextColor(Color.rgb(126, 190, 218))
@@ -567,7 +596,7 @@ class MainActivity : Activity() {
             channelsHeaderView.visibility = View.VISIBLE
             diagnosticsView.visibility = View.VISIBLE
         }
-        if (tvMode && cloudChannels.isEmpty() && !PlayerCloudSync.hasValidLease(this)) activationCodeInput.post { activationCodeInput.requestFocus() }
+        if (tvMode && cloudChannels.isEmpty()) importPlaylistButton.post { importPlaylistButton.requestFocus() }
     }
 
     private fun isTvDevice(): Boolean {
@@ -590,9 +619,10 @@ class MainActivity : Activity() {
     private fun loadCachedChannels() {
         cloudChannels.clear()
         if (!PlayerCloudSync.hasValidLease(this)) {
-            renderCloudChannels()
+            loadLocalPlaylist()
             return
         }
+        localMode = false
         val config = PlayerCloudSync.cachedConfig(this)
         cloudCategories.clear()
         val categoryArray = config?.optJSONArray("categories") ?: JSONArray()
@@ -615,14 +645,46 @@ class MainActivity : Activity() {
         refreshEpgIfNeeded()
     }
 
+    private fun loadLocalPlaylist() {
+        val saved = runCatching { LocalPlaylistStore.load(this) }.getOrElse { error ->
+            cloudStatusView.text = "Archivio locale non leggibile: ${error.message ?: "errore"}"
+            emptyList()
+        }
+        cloudChannels.clear()
+        cloudChannels.addAll(saved)
+        localMode = saved.isNotEmpty()
+        cloudCategories.clear()
+        cloudCategories.addAll(saved.map { it.category.trim() }
+            .filter { it.isNotBlank() && !it.equals("Non classificati", true) }.distinct())
+        favoriteUrls.clear()
+        favoriteUrls.addAll(playerPrefs.getStringSet("favorite_urls", emptySet()).orEmpty())
+        selectedSourceByGroup.clear()
+        runCatching { JSONObject(playerPrefs.getString("selected_source_by_group", "{}") ?: "{}") }
+            .getOrNull()?.let { savedSources ->
+                savedSources.keys().forEach { key ->
+                    savedSources.optString(key).takeIf { it.isNotBlank() }?.let { selectedSourceByGroup[key] = it }
+                }
+            }
+        renderCloudChannels()
+        channelsHeaderView.visibility = if (saved.isNotEmpty()) View.VISIBLE else View.GONE
+        diagnosticsView.visibility = if (saved.isNotEmpty()) View.VISIBLE else View.GONE
+        importPlaylistButton.text = if (saved.isEmpty()) "＋  IMPORTA PLAYLIST M3U" else "↻  SOSTITUISCI PLAYLIST M3U"
+        if (saved.isNotEmpty()) {
+            cloudStatusView.text = "Modalità locale gratuita · ${saved.size} canali sul dispositivo. Tocca qui per opzioni cloud facoltative."
+            refreshEpgIfNeeded()
+        } else {
+            cloudStatusView.text = "Modalità locale gratuita · importa una playlist M3U. Nessun account necessario."
+        }
+    }
+
     private fun renderCloudChannels() {
         if (!::channelsList.isInitialized) return
         channelsList.removeAllViews()
         updateStickyCategoryHeader()
         if (cloudChannels.isEmpty()) {
-            if (isTvDevice() && !PlayerCloudSync.hasValidLease(this)) activationCodeInput.post { activationCodeInput.requestFocus() }
+            if (isTvDevice()) importPlaylistButton.post { importPlaylistButton.requestFocus() }
             val empty = TextView(this).apply {
-                text = "Nessun canale visibile. Inserisci il codice monouso fornito da Admin per attivare il dispositivo."
+                text = "Nessuna playlist caricata. Importa un file M3U dal dispositivo. Non serve un account né una licenza."
                 setTextColor(Color.rgb(164, 181, 202))
                 textSize = if (isTvDevice()) 16f else 14f
                 includeFontPadding = true
@@ -1027,6 +1089,80 @@ class MainActivity : Activity() {
             }
         }
 
+    private fun openLocalPlaylistPicker() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf(
+                "application/x-mpegURL",
+                "application/vnd.apple.mpegurl",
+                "audio/x-mpegurl",
+                "text/plain",
+                "application/octet-stream"
+            ))
+        }
+        startActivityForResult(intent, PICK_LOCAL_PLAYLIST)
+    }
+
+    private fun importLocalPlaylist(uri: Uri) {
+        importPlaylistButton.isEnabled = false
+        cloudStatusView.text = "Importazione playlist locale in corso…"
+        cloudExecutor.execute {
+            try {
+                val input = contentResolver.openInputStream(uri)
+                    ?: throw IOException("Impossibile aprire il file selezionato.")
+                val text = input.use { stream ->
+                    val output = java.io.ByteArrayOutputStream()
+                    val buffer = ByteArray(16 * 1024)
+                    var total = 0L
+                    while (true) {
+                        val count = stream.read(buffer)
+                        if (count < 0) break
+                        total += count
+                        if (total > 32L * 1024L * 1024L) throw IOException("La playlist supera il limite di 32 MB.")
+                        output.write(buffer, 0, count)
+                    }
+                    String(output.toByteArray(), Charsets.UTF_8)
+                }
+                val imported = LocalPlaylistParser.parse(text)
+                LocalPlaylistStore.save(this, imported)
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    localMode = true
+                    cloudChannels.clear()
+                    cloudChannels.addAll(imported)
+                    cloudCategories.clear()
+                    cloudCategories.addAll(imported.map { it.category.trim() }
+                        .filter { it.isNotBlank() && !it.equals("Non classificati", true) }.distinct())
+                    favoriteUrls.clear()
+                    favoriteUrls.addAll(playerPrefs.getStringSet("favorite_urls", emptySet()).orEmpty())
+                    selectedSourceByGroup.clear()
+                    renderCloudChannels()
+                    channelsHeaderView.visibility = View.VISIBLE
+                    diagnosticsView.visibility = View.VISIBLE
+                    importPlaylistButton.text = "↻  SOSTITUISCI PLAYLIST M3U"
+                    cloudStatusView.text = "Playlist locale caricata · ${imported.size} canali · nessun account richiesto."
+                    importPlaylistButton.isEnabled = true
+                    refreshEpgIfNeeded(force = true)
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        cloudStatusView.text = "Importazione non riuscita: ${error.message ?: "file non valido"}"
+                    }
+                    importPlaylistButton.isEnabled = true
+                }
+            }
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == PICK_LOCAL_PLAYLIST && resultCode == RESULT_OK) {
+            data?.data?.let(::importLocalPlaylist)
+        }
+    }
+
     private fun beginCloudPairing() {
         val code = activationCodeInput.text.toString().trim().uppercase()
         if (!code.matches(Regex("[A-HJ-NP-Z2-9]{10}"))) {
@@ -1060,17 +1196,20 @@ class MainActivity : Activity() {
         lastAuthorizationCheckAt = System.currentTimeMillis()
         if (!PlayerCloudSync.hasValidLease(this)) {
             PlayerCloudSync.clearAuthorization(this)
-            cloudChannels.clear()
-            renderCloudChannels()
-            stopPlaybackForAuthorization()
+            if (!localMode) {
+                loadLocalPlaylist()
+                if (!localMode) stopPlaybackForAuthorization()
+            }
             endpointInput.visibility = View.GONE
-            activationCodeInput.visibility = View.VISIBLE
+            activationCodeInput.visibility = View.GONE
             pairButton.visibility = View.GONE
-            diagnosticsView.visibility = View.GONE
-            channelsHeaderView.visibility = View.GONE
-            pairButton.isEnabled = true
-            pairButton.text = "ATTIVA QUESTO DISPOSITIVO"
-            cloudStatusView.text = "Accesso bloccato: inserisci un codice monouso generato da Admin"
+            channelsHeaderView.visibility = if (localMode) View.VISIBLE else View.GONE
+            diagnosticsView.visibility = if (localMode) View.VISIBLE else View.GONE
+            cloudStatusView.text = if (localMode) {
+                "Modalità locale gratuita · sincronizzazione cloud facoltativa. Tocca qui per inserire un codice."
+            } else {
+                "Modalità locale gratuita · importa una playlist M3U. Tocca qui solo se vuoi configurare il cloud."
+            }
             return
         }
         cloudStatusView.text = "Controllo aggiornamenti DAVIX Cloud Sync…"
@@ -1092,17 +1231,15 @@ class MainActivity : Activity() {
                     cloudStatusView.text = "Sincronizzazione non riuscita: ${e.message ?: "offline"}. Mantengo la lista salvata."
                     if (e.message?.contains("device_not_authorized") == true) {
                         PlayerCloudSync.clearAuthorization(this)
-                        cloudChannels.clear()
-                        renderCloudChannels()
+                        localMode = false
+                        loadLocalPlaylist()
                         stopPlaybackForAuthorization()
-                        endpointInput.visibility = View.GONE
-                        activationCodeInput.visibility = View.VISIBLE
-                        pairButton.visibility = View.GONE
-                        diagnosticsView.visibility = View.GONE
-                        channelsHeaderView.visibility = View.GONE
-                        pairButton.isEnabled = true
-                        pairButton.text = "ATTIVA QUESTO DISPOSITIVO"
-                        cloudStatusView.text = "Autorizzazione revocata. Inserisci un nuovo codice generato da Admin."
+                        activationCodeInput.visibility = View.GONE
+                        cloudStatusView.text = if (localMode) {
+                            "Cloud non disponibile: continuo con la playlist locale gratuita."
+                        } else {
+                            "Cloud non disponibile: importa una playlist locale gratuita."
+                        }
                     } else {
                         loadCachedChannels()
                         cloudStatusView.text = if (cloudChannels.isEmpty()) {
@@ -1817,11 +1954,6 @@ class MainActivity : Activity() {
     }
 
     private fun handlePlayIntent(intent: android.content.Intent?) {
-        if (!PlayerCloudSync.hasValidLease(this)) {
-            stopPlaybackForAuthorization()
-            cloudStatusView.text = "Accesso bloccato: attiva prima il dispositivo con un codice monouso."
-            return
-        }
         val uri = intent?.data
         val streamUrl = uri?.getQueryParameter("url")
             ?: intent?.getStringExtra("url")
@@ -1843,6 +1975,7 @@ class MainActivity : Activity() {
         // Se il canale viene aperto dal player HTML, riusa il contesto HTTP
         // del browser: il solo User-Agent del WebView non coincide necessariamente
         // con quello del browser che ha caricato la pagina.
+        if (!PlayerCloudSync.hasValidLease(this)) localMode = true
         val requestHeaders = mutableMapOf("Accept" to "*/*")
         val browserUa = uri?.getQueryParameter("ua")
             ?.takeIf { it.isNotBlank() && it.length <= 512 && !it.contains('\r') && !it.contains('\n') }
@@ -1915,12 +2048,12 @@ class MainActivity : Activity() {
         super.onStart()
         retryHandler.removeCallbacks(diagnosticsTask)
         retryHandler.post(diagnosticsTask)
-        if (resumeAfterBackground && (player?.mediaItemCount ?: 0) > 0 && PlayerCloudSync.hasValidLease(this)) {
+        if (resumeAfterBackground && (player?.mediaItemCount ?: 0) > 0 && (PlayerCloudSync.hasValidLease(this) || localMode)) {
             bufferingStartedAt = 0L
             lastPlaybackProgressAt = System.currentTimeMillis()
             lastObservedPositionMs = C.TIME_UNSET
             player?.playWhenReady = true
-        } else if (!PlayerCloudSync.hasValidLease(this)) {
+        } else if (!PlayerCloudSync.hasValidLease(this) && !localMode) {
             stopPlaybackForAuthorization()
         }
         resumeAfterBackground = false
