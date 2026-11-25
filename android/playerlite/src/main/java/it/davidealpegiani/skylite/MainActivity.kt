@@ -879,12 +879,12 @@ class MainActivity : Activity() {
             Regex("\\b(fhd|full\\s*hd|1080p)\\b").containsMatchIn(value) -> "Full HD"
             Regex("\\bhd\\b|720p").containsMatchIn(value) -> "HD"
             Regex("\\bsd\\b|576p|480p").containsMatchIn(value) -> "SD"
-            else -> "Sorgente ${index + 1}"
+            else -> "Qualità n/d"
         }
+        val originalName = channel.name.trim().ifBlank { "Sorgente " + (index + 1) }
         val host = runCatching { Uri.parse(channel.url).host }.getOrNull().orEmpty()
-        return if (host.isBlank()) quality else "$quality · $host"
+        return listOf(originalName, quality, host).filter { it.isNotBlank() }.joinToString(" · ")
     }
-
     private fun showSourcePicker(group: ChannelSourceGroup) {
         val current = preferredSource(group)
         val labels = group.sources.mapIndexed { index, source ->
