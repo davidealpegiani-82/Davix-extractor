@@ -1,9 +1,6 @@
 package it.davidealpegiani.skylite
 
-/**
- * A single logical channel can expose multiple provider URLs (quality, mirrors,
- * or different group-title values). Keep those sources selectable as variants.
- */
+/** A logical channel may expose multiple selectable provider URLs. */
 internal data class CloudChannel(
     val name: String,
     val url: String,
@@ -20,11 +17,12 @@ internal data class ChannelSourceGroup(
 )
 
 /**
- * Groups only channels with a stable shared identity, while keeping linear
- * channels separate from on-demand titles.
+ * Conservative channel identity matching.
  *
- * Important: words such as "Serie" or "Cinema" in a linear channel brand
- * (e.g. Sky Serie / Sky Cinema) are not sufficient evidence of VOD.
+ * A provider tvg-id is metadata, not proof that two differently named
+ * channels carry the same programme. Identity is based on the exact
+ * normalized channel name; only technical quality/codec labels are removed.
+ * Distinctive words, numbers and suffixes (+1, Sport, Cinema, etc.) remain.
  */
 internal object ChannelSourceGrouper {
     private val episodePattern =
@@ -39,30 +37,42 @@ internal object ChannelSourceGrouper {
         "series", "serie", "tvshows", "tv-shows", "episode", "episodes"
     )
 
+    private fun cleanedName(name: String): String =
+        name.lowercase(java.util.Locale.ROOT)
+            .replace(qualityPattern, " ")
+            .replace(Regex("[^\\p{L}\\p{N}]+"), " ")
+            .trim()
+            .replace(Regex("\\s+"), " ")
+
+    private fun displayName(name: String): String =
+        name.replace(qualityPattern, " ")
+            .replace(Regex("""[\s._-]+"""), " ")
+            .trim()
+            .replace(Regex("\\s+"), " ")
+
     fun group(items: List<CloudChannel>): List<ChannelSourceGroup> {
         val buckets = LinkedHashMap<String, MutableList<CloudChannel>>()
         items.forEach { channel ->
             val mediaKind = mediaKind(channel)
-            val identity = channel.tvgId.trim().takeIf { it.isNotBlank() }
-                ?.let { "id:" + it.lowercase(java.util.Locale.ROOT) }
-                ?: run {
-                    val normalizedName = channel.name.lowercase(java.util.Locale.ROOT)
-                        .replace(qualityPattern, " ")
-                        .replace(Regex("[^\\p{L}\\p{N}]+"), " ")
-                        .trim()
-                        .replace(Regex("\\s+"), " ")
-                    if (normalizedName.isNotBlank()) {
-                        "name:$normalizedName"
-                    } else {
-                        // Avoid merging every unnamed channel into one empty-name group.
-                        "url:" + channel.url.trim().lowercase(java.util.Locale.ROOT)
-                    }
-                }
-            val key = "$mediaKind|$identity"
+            val identity = cleanedName(channel.name)
+            // Empty names never collapse together. tvg-id is not a fallback:
+            // providers sometimes reuse identifiers for unrelated channels.
+            val identityKey = if (identity.isNotBlank()) {
+                "name:$identity"
+            } else {
+                "url:" + channel.url.trim().lowercase(java.util.Locale.ROOT)
+            }
+            val key = "$mediaKind|$identityKey"
             buckets.getOrPut(key) { mutableListOf() }.add(channel)
         }
         return buckets.map { (key, sources) ->
-            ChannelSourceGroup(key, sources.first().name, sources.distinctBy { it.url })
+            val uniqueSources = sources.distinctBy { it.url.trim() }
+            val firstNamed = uniqueSources.firstOrNull { it.name.isNotBlank() }?.name.orEmpty()
+            ChannelSourceGroup(
+                key = key,
+                name = displayName(firstNamed).ifBlank { firstNamed },
+                sources = uniqueSources
+            )
         }
     }
 
