@@ -1443,6 +1443,7 @@ class MainActivity : Activity() {
             cloudStatusView.visibility = View.GONE
             epgStatusView.visibility = View.GONE
             updatesButton.visibility = View.GONE
+            importPlaylistButton.visibility = View.GONE
             channelScroll.visibility = View.GONE
             if (::channelBrowser.isInitialized) channelBrowser.visibility = View.GONE
             cloudHeaderView.visibility = View.GONE
@@ -1483,6 +1484,7 @@ class MainActivity : Activity() {
             cloudStatusView.visibility = View.VISIBLE
             epgStatusView.visibility = View.VISIBLE
             updatesButton.visibility = View.VISIBLE
+            importPlaylistButton.visibility = View.VISIBLE
             channelScroll.visibility = View.VISIBLE
             if (::channelBrowser.isInitialized) channelBrowser.visibility = View.VISIBLE
             cloudHeaderView.visibility = View.GONE
