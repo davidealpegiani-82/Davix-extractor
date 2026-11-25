@@ -33,8 +33,6 @@ jobs:
         run: node android/scripts/verify-import-memory.mjs
       - name: Verify hierarchical URL categories
         run: node android/scripts/verify-url-categories.mjs
-      - name: Verify MandraKodi authenticated browser
-        run: node android/scripts/verify-mandrakodi-browser.mjs
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -87,7 +85,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          manifest_url="https://github.com/davidealpegiani-82/sky-uno-extractor/releases/download/player-lite-latest/version.json"
+          manifest_url="https://github.com/davidealpegiani-82/Davix-extractor/releases/download/player-lite-latest/version.json"
           current_manifest="$(curl --fail --silent --show-error --location "$manifest_url")"
           CURRENT_MANIFEST="$current_manifest" python3 - <<'PY' >> "$GITHUB_ENV"
           import json
@@ -171,7 +169,7 @@ jobs:
               return {"versionCode": int(element["versionCode"]), "versionName": element["versionName"]}
           extractor = read_meta(f"android/app/build/outputs/apk/{variant}/output-metadata.json")
           player = read_meta(f"android/playerlite/build/outputs/apk/{variant}/output-metadata.json")
-          base = "https://github.com/davidealpegiani-82/sky-uno-extractor/releases/download/player-lite-latest/"
+          base = "https://github.com/davidealpegiani-82/Davix-extractor/releases/download/player-lite-latest/"
           manifest = {
               "extractor": {**extractor, "apkUrl": base + "DAVIX-Extractor.apk"},
               "player": {**player, "apkUrl": base + "DAVIX-Player.apk"}
