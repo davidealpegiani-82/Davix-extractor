@@ -20,17 +20,16 @@ internal data class ChannelSourceGroup(
  * Conservative channel identity matching.
  *
  * A provider tvg-id is metadata, not proof that two differently named
- * channels carry the same programme. Identity is therefore based on the
- * exact normalized channel name; only technical quality/codec labels are
- * removed. Distinctive words, numbers and suffixes (+1, Sport, Cinema, etc.)
- * are deliberately preserved.
+ * channels carry the same programme. Identity is based on the exact
+ * normalized channel name; only technical quality/codec labels are removed.
+ * Distinctive words, numbers and suffixes (+1, Sport, Cinema, etc.) remain.
  */
 internal object ChannelSourceGrouper {
     private val episodePattern =
-        Regex("""(?i)\\bS\\d{1,2}\\s*E\\d{1,3}\\b|\\b\\d{1,2}x\\d{1,3}\\b""")
+        Regex("""(?i)\bS\d{1,2}\s*E\d{1,3}\b|\b\d{1,2}x\d{1,3}\b""")
 
     private val qualityPattern = Regex(
-        """(?i)\\b(8k|4k|uhd|fhd|full\\s*hd|hd|sd|2160p|1080p|1080i|720p|576p|480p|hevc|h[ .]?265|x265|h[ .]?264|x264|hdr10\\+?|50\\s*fps|60\\s*fps)\\b"""
+        """(?i)\b(8k|4k|uhd|fhd|full\s*hd|hd|sd|2160p|1080p|1080i|720p|576p|480p|hevc|h[ .]?265|x265|h[ .]?264|x264|hdr10\+?|50\s*fps|60\s*fps)\b"""
     )
 
     private val vodPathSegments = setOf(
@@ -41,13 +40,13 @@ internal object ChannelSourceGrouper {
     private fun cleanedName(name: String): String =
         name.lowercase(java.util.Locale.ROOT)
             .replace(qualityPattern, " ")
-            .replace(Regex("[^\\\\p{L}\\\\p{N}]+"), " ")
+            .replace(Regex("[^\\p{L}\\p{N}]+"), " ")
             .trim()
             .replace(Regex("\\s+"), " ")
 
     private fun displayName(name: String): String =
         name.replace(qualityPattern, " ")
-            .replace(Regex("""[\\s._-]+"""), " ")
+            .replace(Regex("""[\s._-]+"""), " ")
             .trim()
             .replace(Regex("\\s+"), " ")
 
@@ -56,8 +55,8 @@ internal object ChannelSourceGrouper {
         items.forEach { channel ->
             val mediaKind = mediaKind(channel)
             val identity = cleanedName(channel.name)
-            // Empty names must never collapse together. tvg-id is intentionally
-            // not used as a fallback because providers often reuse identifiers.
+            // Empty names never collapse together. tvg-id is not a fallback:
+            // providers sometimes reuse identifiers for unrelated channels.
             val identityKey = if (identity.isNotBlank()) {
                 "name:$identity"
             } else {
