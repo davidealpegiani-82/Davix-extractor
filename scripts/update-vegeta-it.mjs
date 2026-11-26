@@ -178,21 +178,3 @@ async function main() {
   if (!Array.isArray(catalog.servers)) die("servers non è un array");
 
   fs.mkdirSync(path.dirname(CATALOG_PATH), { recursive: true });
-  fs.writeFileSync(CATALOG_PATH, JSON.stringify(catalog, null, 2) + "\n", "utf8");
-
-  console.log(`✓ Catalogo scritto: ${CATALOG_PATH}`);
-  console.log(`  Server IT: ${catalog.serverCount} (up: ${catalog.upCount}, down: ${catalog.downCount})`);
-  if (changes.length) {
-    console.log(`  Variazioni rilevate: ${changes.length}`);
-    for (const c of changes) {
-      console.log(`    - ${c.type}: \( {c.name || c.id} \){c.from ? ` (${c.from} → ${c.to})` : ""}`);
-    }
-  } else {
-    console.log("  Nessuna variazione rispetto al catalogo precedente");
-  }
-}
-
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
