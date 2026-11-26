@@ -3,9 +3,9 @@
   "source": "vegeta-tv-server-status",
   "sourceUrl": "http://vegetatvoficial.duckdns.org/data/server_status.json",
   "countryHint": "IT",
-  "note": "region=IT indica la classificazione del server da parte di Vegeta, non garantisce che tutti i canali siano italiani. La classificazione a livello di singolo canale verrà fatta in seguito.",
-  "updatedAt": "2026-11-26T05:12:05.330Z",
-  "sourceGeneratedAt": "2026-11-26T05:07:16Z",
+  "note": "region=IT indica la classificazione del server da parte di Vegeta, non garantisce che tutti i canali siano italiani. La classificazione a livello di singolo canale verra fatta in seguito.",
+  "updatedAt": "2026-11-26T18:16:23.473Z",
+  "sourceGeneratedAt": "2026-11-26T18:11:27Z",
   "serverCount": 4,
   "upCount": 4,
   "downCount": 0,
@@ -20,11 +20,11 @@
       "url": "http://ios.dragonsdog.com:80/get.php?username=peppedent&password=Rl8HYEmMFn24&type=m3u_plus&output=m3u8",
       "apiUp": true,
       "mediaState": "up",
-      "lastChecked": "2026-11-26T05:05:46Z",
-      "responseTimeMs": 334,
+      "lastChecked": "2026-11-26T17:44:24Z",
+      "responseTimeMs": 338,
       "workingExample": {
         "category": "TV SAT",
-        "stream": "Cielo HD"
+        "stream": "Rai 4 HD"
       },
       "source": "vegeta",
       "sourceUrl": "http://vegetatvoficial.duckdns.org/data/server_status.json"
@@ -39,11 +39,11 @@
       "url": "http://ottrunph.cloudfys.uk:2086/get.php?username=follica&password=1ERE8&type=m3u_plus&output=m3u8",
       "apiUp": true,
       "mediaState": "up",
-      "lastChecked": "2026-11-26T05:05:47Z",
-      "responseTimeMs": 1266,
+      "lastChecked": "2026-11-26T17:44:26Z",
+      "responseTimeMs": 1370,
       "workingExample": {
         "category": "✦ TV SAT",
-        "stream": "Rai 3 SD"
+        "stream": "27 Twentyseven FHD"
       },
       "source": "vegeta",
       "sourceUrl": "http://vegetatvoficial.duckdns.org/data/server_status.json"
@@ -58,11 +58,11 @@
       "url": "http://primark.mywire.org:26650/get.php?username=guarinanto&password=GETT1&type=m3u_plus&output=m3u8",
       "apiUp": true,
       "mediaState": "up",
-      "lastChecked": "2026-11-26T05:05:47Z",
-      "responseTimeMs": 1472,
+      "lastChecked": "2026-11-26T17:44:26Z",
+      "responseTimeMs": 1475,
       "workingExample": {
         "category": "✦ TV SAT",
-        "stream": "Rai 2 SD"
+        "stream": "Nove FHD"
       },
       "source": "vegeta",
       "sourceUrl": "http://vegetatvoficial.duckdns.org/data/server_status.json"
@@ -77,11 +77,11 @@
       "url": "http://asenkis.kismo1.org/get.php?username=001EB8C31547&password=aq5f4jFm&type=m3u",
       "apiUp": true,
       "mediaState": "up",
-      "lastChecked": "2026-11-26T05:05:46Z",
-      "responseTimeMs": 312,
+      "lastChecked": "2026-11-26T17:44:26Z",
+      "responseTimeMs": 1528,
       "workingExample": {
         "category": "TOP ITALIA GRB-TORO",
-        "stream": ": Italia 1 FHD"
+        "stream": ": Canale 5 FHD +1"
       },
       "source": "vegeta",
       "sourceUrl": "http://vegetatvoficial.duckdns.org/data/server_status.json"
@@ -92,10 +92,30 @@
       "at": "2026-11-26T05:12:05.330Z",
       "sourceGeneratedAt": "2026-11-26T05:07:16Z",
       "changes": [
-        { "type": "added", "id": "vegeta-it-15-ios.dragonsdog.com", "name": "Server 15", "status": "up" },
-        { "type": "added", "id": "vegeta-it-16-ottrunph.cloudfys.uk", "name": "Server 16", "status": "up" },
-        { "type": "added", "id": "vegeta-it-17-primark.mywire.org", "name": "Server 17", "status": "up" },
-        { "type": "added", "id": "vegeta-it-18-asenkis.kismo1.org", "name": "Server 18", "status": "up" }
+        {
+          "type": "added",
+          "id": "vegeta-it-15-ios.dragonsdog.com",
+          "name": "Server 15",
+          "status": "up"
+        },
+        {
+          "type": "added",
+          "id": "vegeta-it-16-ottrunph.cloudfys.uk",
+          "name": "Server 16",
+          "status": "up"
+        },
+        {
+          "type": "added",
+          "id": "vegeta-it-17-primark.mywire.org",
+          "name": "Server 17",
+          "status": "up"
+        },
+        {
+          "type": "added",
+          "id": "vegeta-it-18-asenkis.kismo1.org",
+          "name": "Server 18",
+          "status": "up"
+        }
       ]
     }
   ]
