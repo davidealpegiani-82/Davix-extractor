@@ -1,0 +1,46 @@
+name: Update Vegeta IT Servers Catalog
+
+on:
+  schedule:
+    # Ogni 4 ore
+    - cron: "0 */4 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  update-catalog:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Run updater
+        run: node scripts/update-vegeta-it.mjs
+
+      - name: Detect changes
+        id: changes
+        run: |
+          if git diff --quiet -- catalogs/it/vegeta-it-servers.json; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Nessuna modifica al catalogo"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Catalogo modificato"
+            git diff --stat -- catalogs/it/vegeta-it-servers.json
+          fi
+
+      - name: Commit and push
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add catalogs/it/vegeta-it-servers.json
+          git commit -m "chore(catalog): aggiorna server italiani Vegeta TV"
+          git push
