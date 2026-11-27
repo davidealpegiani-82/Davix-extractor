@@ -4,8 +4,8 @@
   "sourceUrl": "http://vegetatvoficial.duckdns.org/data/server_status.json",
   "countryHint": "IT",
   "note": "region=IT indica la classificazione del server da parte di Vegeta, non garantisce che tutti i canali siano italiani. La classificazione a livello di singolo canale verra fatta in seguito.",
-  "updatedAt": "2026-11-26T18:16:23.473Z",
-  "sourceGeneratedAt": "2026-11-26T18:11:27Z",
+  "updatedAt": "2026-11-27T02:43:24.746Z",
+  "sourceGeneratedAt": "2026-11-27T02:26:46Z",
   "serverCount": 4,
   "upCount": 4,
   "downCount": 0,
@@ -20,11 +20,11 @@
       "url": "http://ios.dragonsdog.com:80/get.php?username=peppedent&password=Rl8HYEmMFn24&type=m3u_plus&output=m3u8",
       "apiUp": true,
       "mediaState": "up",
-      "lastChecked": "2026-11-26T17:44:24Z",
-      "responseTimeMs": 338,
+      "lastChecked": "2026-11-27T02:25:35Z",
+      "responseTimeMs": 388,
       "workingExample": {
         "category": "TV SAT",
-        "stream": "Rai 4 HD"
+        "stream": "Canale 5 HD"
       },
       "source": "vegeta",
       "sourceUrl": "http://vegetatvoficial.duckdns.org/data/server_status.json"
@@ -39,11 +39,11 @@
       "url": "http://ottrunph.cloudfys.uk:2086/get.php?username=follica&password=1ERE8&type=m3u_plus&output=m3u8",
       "apiUp": true,
       "mediaState": "up",
-      "lastChecked": "2026-11-26T17:44:26Z",
-      "responseTimeMs": 1370,
+      "lastChecked": "2026-11-27T02:25:37Z",
+      "responseTimeMs": 1401,
       "workingExample": {
         "category": "✦ TV SAT",
-        "stream": "27 Twentyseven FHD"
+        "stream": "Rai Storia SD"
       },
       "source": "vegeta",
       "sourceUrl": "http://vegetatvoficial.duckdns.org/data/server_status.json"
@@ -58,11 +58,11 @@
       "url": "http://primark.mywire.org:26650/get.php?username=guarinanto&password=GETT1&type=m3u_plus&output=m3u8",
       "apiUp": true,
       "mediaState": "up",
-      "lastChecked": "2026-11-26T17:44:26Z",
-      "responseTimeMs": 1475,
+      "lastChecked": "2026-11-27T02:25:37Z",
+      "responseTimeMs": 1463,
       "workingExample": {
         "category": "✦ TV SAT",
-        "stream": "Nove FHD"
+        "stream": "Canale 5 FHD"
       },
       "source": "vegeta",
       "sourceUrl": "http://vegetatvoficial.duckdns.org/data/server_status.json"
@@ -77,11 +77,11 @@
       "url": "http://asenkis.kismo1.org/get.php?username=001EB8C31547&password=aq5f4jFm&type=m3u",
       "apiUp": true,
       "mediaState": "up",
-      "lastChecked": "2026-11-26T17:44:26Z",
-      "responseTimeMs": 1528,
+      "lastChecked": "2026-11-27T02:25:37Z",
+      "responseTimeMs": 1317,
       "workingExample": {
         "category": "TOP ITALIA GRB-TORO",
-        "stream": ": Canale 5 FHD +1"
+        "stream": ": Focus HD"
       },
       "source": "vegeta",
       "sourceUrl": "http://vegetatvoficial.duckdns.org/data/server_status.json"
