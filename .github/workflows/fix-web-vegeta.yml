@@ -1,0 +1,109 @@
+name: Fix Web Vegeta IT
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Restore index and updater from last good commit
+        run: |
+          set -euo pipefail
+          GOOD=a4299f9d64e3b5b94b94fd97b175b756ca29f141
+          git show "$GOOD:index.html" > index.html
+          git show "$GOOD:scripts/update-vegeta-it.mjs" > scripts/update-vegeta-it.mjs
+
+      - name: Patch index.html with Vegeta IT button
+        run: |
+          python3 << 'PY'
+          from pathlib import Path
+          path = Path("index.html")
+          text = path.read_text(encoding="utf-8")
+          old = '<div class="actions"><button id="replaceList" class="green" type="button">Svuota archivio e carica nuova lista</button></div>'
+          new = '<div class="actions"><button id="importVegeta" class="primary" type="button">🇮🇹 Importa server Vegeta IT</button><button id="replaceList" class="green" type="button">Svuota archivio e carica nuova lista</button></div>'
+          if old not in text:
+              raise SystemExit("blocco actions non trovato")
+          text = text.replace(old, new, 1)
+          js = r'''
+          const VEGETA_CHANNELS_URLS=[
+            new URL("./catalogs/it/vegeta-it-channels.json",document.baseURI).href,
+            "https://raw.githubusercontent.com/davidealpegiani-82/Davix-extractor/main/catalogs/it/vegeta-it-channels.json"
+          ];
+          async function fetchVegetaChannelsCatalog(){
+            let lastErr=null;
+            for(const url of VEGETA_CHANNELS_URLS){
+              try{
+                const res=await fetch(url,{cache:"no-store"});
+                if(!res.ok)throw new Error("HTTP "+res.status);
+                const data=await res.json();
+                if(!data||!Array.isArray(data.channels))throw new Error("Catalogo canali non valido");
+                return data;
+              }catch(e){lastErr=e}
+            }
+            throw lastErr||new Error("Catalogo Vegeta non disponibile");
+          }
+          function cleanVegeta(s){return String(s||'').replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#39;/g,"'").trim()}
+          async function importVegetaItServers(){
+            const btn=$("importVegeta");
+            if(btn)btn.disabled=true;
+            $("status").textContent="Connessione al catalogo Vegeta IT…";
+            try{
+              const data=await fetchVegetaChannelsCatalog();
+              const incoming=(data.channels||[]).filter(c=>c&&c.name&&/^https?:\/\//i.test(c.url||""));
+              if(!incoming.length)throw new Error("Nessun canale nel catalogo Vegeta IT. Avvia il workflow catalogo canali.");
+              const known=new Set(channels.map(c=>c.name.toLowerCase()+"|"+c.url));
+              let added=0,duplicates=0;
+              for(const raw of incoming){
+                const name=cleanVegeta(raw.name);
+                const url=cleanVegeta(raw.url);
+                const logo=cleanVegeta(raw.logo||"");
+                const source=cleanVegeta(raw.category||raw.serverName||"Vegeta IT")||"Vegeta IT";
+                const key=name.toLowerCase()+"|"+url;
+                if(known.has(key)){duplicates++;continue}
+                known.add(key);
+                const i=channels.length;
+                channels.push({name,url,logo,source});
+                selected.add(i);
+                added++;
+              }
+              persistLibrary();
+              render();
+              const when=data.updatedAt?(" · aggiornato "+new Date(data.updatedAt).toLocaleString("it-IT")):"";
+              $("status").textContent="Vegeta IT: "+added+" nuovi canali importati, "+duplicates+" duplicati ignorati (catalogo: "+incoming.length+" canali"+when+").";
+              $("playing").textContent=channels.length?"Scegli un canale e premi ▶ per provarlo nel player.":"Carica una playlist valida.";
+            }catch(error){
+              $("status").textContent="Importazione Vegeta IT non riuscita: "+(error&&error.message?error.message:"errore di rete");
+            }finally{
+              if(btn)btn.disabled=false;
+            }
+          }
+          $("importVegeta").onclick=()=>importVegetaItServers();
+
+          '''
+          if "importVegetaItServers" not in text:
+              if "restoreLibrary();" not in text:
+                  raise SystemExit("marker restoreLibrary non trovato")
+              text = text.replace("restoreLibrary();", js + "restoreLibrary();", 1)
+          path.write_text(text, encoding="utf-8")
+          print("index.html aggiornato", path.stat().st_size)
+          PY
+
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html scripts/update-vegeta-it.mjs scripts/update-vegeta-channels.mjs
+          if git diff --cached --quiet; then
+            echo "Nessuna modifica"
+          else
+            git commit -m "feat(web): Importa server Vegeta IT e ripristino file web"
+            git push
+          fi
