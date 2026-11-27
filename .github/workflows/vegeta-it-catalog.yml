@@ -2,7 +2,6 @@ name: Update Vegeta IT Servers Catalog
 
 on:
   schedule:
-    # Ogni 4 ore
     - cron: "0 */4 * * *"
   workflow_dispatch: {}
 
@@ -21,8 +20,11 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Run updater
+      - name: Update servers catalog
         run: node scripts/update-vegeta-it.mjs
+
+      - name: Aggregate Italian channels for Web
+        run: node scripts/update-vegeta-channels.mjs
 
       - name: Detect changes
         id: changes
