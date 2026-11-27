@@ -4,8 +4,8 @@
   "sourceUrl": "http://vegetatvoficial.duckdns.org/data/server_status.json",
   "countryHint": "IT",
   "note": "region=IT indica la classificazione del server da parte di Vegeta, non garantisce che tutti i canali siano italiani. La classificazione a livello di singolo canale verra fatta in seguito.",
-  "updatedAt": "2026-11-27T13:39:11.414Z",
-  "sourceGeneratedAt": "2026-11-27T13:34:44Z",
+  "updatedAt": "2026-11-27T23:57:45.229Z",
+  "sourceGeneratedAt": "2026-11-27T23:56:31Z",
   "serverCount": 4,
   "upCount": 4,
   "downCount": 0,
@@ -20,11 +20,11 @@
       "url": "http://ios.dragonsdog.com:80/get.php?username=peppedent&password=Rl8HYEmMFn24&type=m3u_plus&output=m3u8",
       "apiUp": true,
       "mediaState": "up",
-      "lastChecked": "2026-11-27T13:33:29Z",
-      "responseTimeMs": 327,
+      "lastChecked": "2026-11-27T23:56:28Z",
+      "responseTimeMs": 308,
       "workingExample": {
         "category": "TV SAT",
-        "stream": "Rsi La 2 HD"
+        "stream": "Iris HD"
       },
       "source": "vegeta",
       "sourceUrl": "http://vegetatvoficial.duckdns.org/data/server_status.json"
@@ -39,11 +39,11 @@
       "url": "http://ottrunph.cloudfys.uk:2086/get.php?username=follica&password=1ERE8&type=m3u_plus&output=m3u8",
       "apiUp": true,
       "mediaState": "up",
-      "lastChecked": "2026-11-27T13:33:31Z",
-      "responseTimeMs": 1351,
+      "lastChecked": "2026-11-27T23:56:29Z",
+      "responseTimeMs": 1376,
       "workingExample": {
         "category": "✦ TV SAT",
-        "stream": "RSI La 1 FHD"
+        "stream": "Top Crime SD"
       },
       "source": "vegeta",
       "sourceUrl": "http://vegetatvoficial.duckdns.org/data/server_status.json"
@@ -58,11 +58,11 @@
       "url": "http://primark.mywire.org:26650/get.php?username=guarinanto&password=GETT1&type=m3u_plus&output=m3u8",
       "apiUp": true,
       "mediaState": "up",
-      "lastChecked": "2026-11-27T13:33:31Z",
-      "responseTimeMs": 1570,
+      "lastChecked": "2026-11-27T23:56:29Z",
+      "responseTimeMs": 1469,
       "workingExample": {
         "category": "✦ TV SAT",
-        "stream": "Real Time SD"
+        "stream": "Cielo HD"
       },
       "source": "vegeta",
       "sourceUrl": "http://vegetatvoficial.duckdns.org/data/server_status.json"
@@ -77,11 +77,11 @@
       "url": "http://asenkis.kismo1.org/get.php?username=001EB8C31547&password=aq5f4jFm&type=m3u",
       "apiUp": true,
       "mediaState": "up",
-      "lastChecked": "2026-11-27T13:33:31Z",
-      "responseTimeMs": 1429,
+      "lastChecked": "2026-11-27T23:56:30Z",
+      "responseTimeMs": 1657,
       "workingExample": {
         "category": "TOP ITALIA GRB-TORO",
-        "stream": ": La5 FHD"
+        "stream": ": 27 Mediaset FHD"
       },
       "source": "vegeta",
       "sourceUrl": "http://vegetatvoficial.duckdns.org/data/server_status.json"
