@@ -1,0 +1,26 @@
+name: Rebuild Web Vegeta IT
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Assemble web files
+        run: node android/scripts/web-rebuild/assemble-web.mjs
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html scripts/update-vegeta-it.mjs
+          if git diff --cached --quiet; then
+            echo "Nessuna modifica"
+          else
+            git commit -m "feat(web): Importa server Vegeta IT + updater canali filtrati"
+            git push
+          fi
