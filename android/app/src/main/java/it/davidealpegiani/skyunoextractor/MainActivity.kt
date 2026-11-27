@@ -2011,12 +2011,11 @@ class MainActivity : FragmentActivity() {
         updateImportProgress("Caricamento playlist salvata · lettura file…", null)
         Thread({
             try {
-                val found = try {
-                    parseChannels(file.readText(StandardCharsets.UTF_8)) { parsed ->
-                        updateImportProgress("Analisi playlist salvata · $parsed%", parsed)
-                    }
-                } finally {
-                    if (deleteAfterImport) file.delete()
+                // Conserva il file sorgente finché l'importazione non è stata
+                // completata davvero: una playlist vuota o non riconosciuta deve
+                // restare disponibile per diagnosi e nuovo tentativo.
+                val found = parseChannels(file.readText(StandardCharsets.UTF_8)) { parsed ->
+                    updateImportProgress("Analisi playlist salvata · $parsed%", parsed)
                 }
                 if (found.isEmpty()) {
                     runOnUiThread {
@@ -2096,6 +2095,10 @@ class MainActivity : FragmentActivity() {
                                             renderChannels()
                                             persistChannelLibrary()
                                             saveCategorySettings()
+                                            if (deleteAfterImport) {
+                                                runCatching { file.delete() }
+                                                    .onFailure { Log.w("DAVIX-IMPORT", "File temporaneo non eliminato", it) }
+                                            }
                                             importInProgress = false
                                             finishImportProgress()
                                         }
