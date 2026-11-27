@@ -15,7 +15,6 @@ jobs:
           fetch-depth: 0
 
       - name: Restore and patch MainActivity
-        shell: bash
         run: |
           set -euo pipefail
           TARGET="android/app/src/main/java/it/davidealpegiani/skyunoextractor/MainActivity.kt"
