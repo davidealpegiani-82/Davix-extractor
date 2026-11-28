@@ -1,0 +1,83 @@
+name: Patch playback buffers
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Raise buffer thresholds
+        run: |
+          python3 << 'PY'
+          import re
+          from pathlib import Path
+
+          def patch_buffer(path: Path, min_ms, max_ms, playback_ms, rebuffer_ms, target_bytes):
+              text = path.read_text(encoding="utf-8")
+              pattern = re.compile(
+                  r"\.setBufferDurationsMs\(\s*\n"
+                  r"\s*\d+_\d+,.*?\n"
+                  r"\s*\d+_\d+,.*?\n"
+                  r"\s*\d+_\d+,.*?\n"
+                  r"\s*\d+_\d+.*?\n"
+                  r"\s*\)",
+                  re.S,
+              )
+              repl = (
+                  ".setBufferDurationsMs(\n"
+                  f"                {min_ms}, // buffer minimo\n"
+                  f"                {max_ms}, // riserva massima\n"
+                  f"                {playback_ms}, // avvio\n"
+                  f"                {rebuffer_ms} // dopo rebuffer\n"
+                  "            )"
+              )
+              new_text, n = pattern.subn(repl, text, count=1)
+              if n == 0:
+                  print(f"WARN buffer durations not found in {path}")
+              else:
+                  print(f"buffer durations patched in {path.name}: {n}")
+                  text = new_text
+
+              text2, n2 = re.subn(
+                  r"\.setTargetBufferBytes\(\d+ \* 1024 \* 1024\)",
+                  f".setTargetBufferBytes({target_bytes} * 1024 * 1024)",
+                  text,
+                  count=1,
+              )
+              if n2:
+                  print(f"target bytes patched in {path.name}")
+                  text = text2
+              else:
+                  print(f"WARN target bytes not found in {path}")
+
+              path.write_text(text, encoding="utf-8")
+
+          patch_buffer(
+              Path("android/app/src/main/java/it/davidealpegiani/skyunoextractor/MainActivity.kt"),
+              "40_000", "180_000", "5_000", "20_000", 96,
+          )
+          patch_buffer(
+              Path("android/playerlite/src/main/java/it/davidealpegiani/skylite/MainActivity.kt"),
+              "45_000", "180_000", "5_000", "22_000", 112,
+          )
+          PY
+
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            android/app/src/main/java/it/davidealpegiani/skyunoextractor/MainActivity.kt \
+            android/playerlite/src/main/java/it/davidealpegiani/skylite/MainActivity.kt
+          if git diff --cached --quiet; then
+            echo "Nessuna modifica"
+          else
+            git commit -m "perf: buffer più ampi per ridurre interruzioni HLS"
+            git push
+          fi
