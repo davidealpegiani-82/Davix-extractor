@@ -1782,14 +1782,14 @@ class MainActivity : Activity() {
     private fun initializePlayer() {
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                35_000,
-                150_000,
-                4_000,
-                15_000
+                45_000, // buffer minimo
+                180_000, // riserva massima
+                5_000, // avvio
+                22_000 // dopo rebuffer
             )
             // Limita la memoria occupata dai segmenti: la durata del buffer non deve
             // crescere senza controllo su TV con memoria ridotta.
-            .setTargetBufferBytes(96 * 1024 * 1024)
+            .setTargetBufferBytes(112 * 1024 * 1024)
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
