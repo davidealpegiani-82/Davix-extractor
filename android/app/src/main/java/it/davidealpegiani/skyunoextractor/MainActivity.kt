@@ -186,12 +186,12 @@ class MainActivity : FragmentActivity() {
         // Profilo più leggero per dispositivi TV/Android con memoria limitata.
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                40_000, // buffer minimo
-                180_000, // riserva massima
-                5_000, // avvio
-                20_000 // dopo rebuffer
+                55_000, // min: mantiene il download attivo
+                240_000, // max: riserva ampia
+                6_000, // avvio
+                30_000 // dopo rebuffer
             )
-            .setTargetBufferBytes(96 * 1024 * 1024)
+            .setTargetBufferBytes(128 * 1024 * 1024)
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
@@ -200,7 +200,7 @@ class MainActivity : FragmentActivity() {
         val liveSpeedControl = DefaultLivePlaybackSpeedControl.Builder()
             .setFallbackMinPlaybackSpeed(0.97f)
             .setFallbackMaxPlaybackSpeed(1.04f)
-            .setTargetLiveOffsetIncrementOnRebufferMs(25_000)
+            .setTargetLiveOffsetIncrementOnRebufferMs(40_000)
             .build()
 
         // Usa uno User-Agent Android/browser invece di identificare le richieste
@@ -412,14 +412,14 @@ class MainActivity : FragmentActivity() {
             streamMimeType(streamUrl)?.let { mediaItemBuilder.setMimeType(it) }
             val mediaItem = mediaItemBuilder
                 .setLiveConfiguration(
-                    MediaItem.LiveConfiguration.Builder()
-                        .setTargetOffsetMs(60_000)
-                        .setMinOffsetMs(45_000)
-                        .setMaxOffsetMs(120_000)
-                        .setMinPlaybackSpeed(0.97f)
-                        .setMaxPlaybackSpeed(1.03f)
-                        .build()
-                )
+          MediaItem.LiveConfiguration.Builder()
+              .setTargetOffsetMs(120_000)
+              .setMinOffsetMs(75_000)
+              .setMaxOffsetMs(300_000)
+              .setMinPlaybackSpeed(0.96f)
+              .setMaxPlaybackSpeed(1.03f)
+              .build()
+      )
                 .build()
             player.setMediaItem(mediaItem)
             player.prepare()
@@ -2943,14 +2943,14 @@ class MainActivity : FragmentActivity() {
             streamMimeType(channel.url)?.let { mediaItemBuilder.setMimeType(it) }
             val mediaItem = mediaItemBuilder
                 .setLiveConfiguration(
-                    MediaItem.LiveConfiguration.Builder()
-                        .setTargetOffsetMs(55_000)
-                        .setMinOffsetMs(35_000)
-                        .setMaxOffsetMs(120_000)
-                        .setMinPlaybackSpeed(0.97f)
-                        .setMaxPlaybackSpeed(1.03f)
-                        .build()
-                )
+          MediaItem.LiveConfiguration.Builder()
+              .setTargetOffsetMs(120_000)
+              .setMinOffsetMs(75_000)
+              .setMaxOffsetMs(300_000)
+              .setMinPlaybackSpeed(0.96f)
+              .setMaxPlaybackSpeed(1.03f)
+              .build()
+      )
                 .build()
             player.setMediaItem(mediaItem)
             player.prepare()

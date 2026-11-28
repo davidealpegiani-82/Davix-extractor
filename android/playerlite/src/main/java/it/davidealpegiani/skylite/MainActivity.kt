@@ -1606,14 +1606,14 @@ class MainActivity : Activity() {
             // Per URL senza estensione non imporre HLS: Media3 usa il rilevamento automatico.
         }
         return builder.setLiveConfiguration(
-                MediaItem.LiveConfiguration.Builder()
-                    .setTargetOffsetMs(60_000)
-                    .setMinOffsetMs(45_000)
-                    .setMaxOffsetMs(120_000)
-                    .setMinPlaybackSpeed(0.97f)
-                    .setMaxPlaybackSpeed(1.04f)
-                    .build()
-            )
+          MediaItem.LiveConfiguration.Builder()
+              .setTargetOffsetMs(120_000)
+              .setMinOffsetMs(75_000)
+              .setMaxOffsetMs(300_000)
+              .setMinPlaybackSpeed(0.96f)
+              .setMaxPlaybackSpeed(1.03f)
+              .build()
+      )
             .build()
     }
 
@@ -1672,7 +1672,7 @@ class MainActivity : Activity() {
                 if (bufferingStartedAt == 0L) bufferingStartedAt = now
                 // Lascia terminare i timeout HTTP e i retry interni di Media3 prima
                 // di riavviare la playlist dall'ultimo live edge disponibile.
-                if (now - bufferingStartedAt >= 50_000L && bufferedAheadMs < 2_000L) {
+                if (now - bufferingStartedAt >= 70_000L && bufferedAheadMs < 1_500L) {
                     schedulePlaybackRecovery("Buffer esaurito: ripristino automatico")
                 }
             }
@@ -1782,14 +1782,14 @@ class MainActivity : Activity() {
     private fun initializePlayer() {
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                45_000, // buffer minimo
-                180_000, // riserva massima
-                5_000, // avvio
-                22_000 // dopo rebuffer
+                60_000, // min: mantiene il download attivo
+                240_000, // max: riserva ampia
+                6_000, // avvio
+                30_000 // dopo rebuffer
             )
             // Limita la memoria occupata dai segmenti: la durata del buffer non deve
             // crescere senza controllo su TV con memoria ridotta.
-            .setTargetBufferBytes(112 * 1024 * 1024)
+            .setTargetBufferBytes(128 * 1024 * 1024)
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
@@ -1811,7 +1811,7 @@ class MainActivity : Activity() {
         val liveSpeedControl = DefaultLivePlaybackSpeedControl.Builder()
             .setFallbackMinPlaybackSpeed(0.97f)
             .setFallbackMaxPlaybackSpeed(1.03f)
-            .setTargetLiveOffsetIncrementOnRebufferMs(25_000)
+            .setTargetLiveOffsetIncrementOnRebufferMs(40_000)
             .build()
 
         // Come nell'Extractor, lascia che Media3 riconosca il contenuto: forzare
