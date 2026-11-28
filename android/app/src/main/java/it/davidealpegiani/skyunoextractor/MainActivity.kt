@@ -200,7 +200,7 @@ class MainActivity : FragmentActivity() {
         val liveSpeedControl = DefaultLivePlaybackSpeedControl.Builder()
             .setFallbackMinPlaybackSpeed(0.97f)
             .setFallbackMaxPlaybackSpeed(1.04f)
-            .setTargetLiveOffsetIncrementOnRebufferMs(15_000)
+            .setTargetLiveOffsetIncrementOnRebufferMs(25_000)
             .build()
 
         // Usa uno User-Agent Android/browser invece di identificare le richieste
@@ -2361,7 +2361,7 @@ class MainActivity : FragmentActivity() {
                 if (isGroupPlaying || isPlayingChannel) playingChannelButton = this
                 setOnClickListener {
                     if (variantCount <= 1) playChannel(index, this)
-                    else showChannelVariants(displayName, variantIndices, this)
+                    else ChannelVariantUi.show(this@MainActivity, displayName, channels, variantIndices) { playChannel(it, this) }
                 }
             }
             row.addView(play, LinearLayout.LayoutParams(0, dp(48), 1f))

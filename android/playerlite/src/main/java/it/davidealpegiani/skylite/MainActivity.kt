@@ -1672,7 +1672,7 @@ class MainActivity : Activity() {
                 if (bufferingStartedAt == 0L) bufferingStartedAt = now
                 // Lascia terminare i timeout HTTP e i retry interni di Media3 prima
                 // di riavviare la playlist dall'ultimo live edge disponibile.
-                if (now - bufferingStartedAt >= 35_000L && bufferedAheadMs < 3_000L) {
+                if (now - bufferingStartedAt >= 50_000L && bufferedAheadMs < 2_000L) {
                     schedulePlaybackRecovery("Buffer esaurito: ripristino automatico")
                 }
             }
@@ -1811,7 +1811,7 @@ class MainActivity : Activity() {
         val liveSpeedControl = DefaultLivePlaybackSpeedControl.Builder()
             .setFallbackMinPlaybackSpeed(0.97f)
             .setFallbackMaxPlaybackSpeed(1.03f)
-            .setTargetLiveOffsetIncrementOnRebufferMs(15_000)
+            .setTargetLiveOffsetIncrementOnRebufferMs(25_000)
             .build()
 
         // Come nell'Extractor, lascia che Media3 riconosca il contenuto: forzare
