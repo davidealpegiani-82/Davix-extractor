@@ -1,0 +1,38 @@
+name: Fix verify live offset asserts
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch remaining asserts
+        run: |
+          python3 << 'PY'
+          from pathlib import Path
+          p = Path("android/scripts/verify-player-template.mjs")
+          t = p.read_text(encoding="utf-8")
+          reps = [
+            ("setTargetOffsetMs(60_000)", "setTargetOffsetMs(120_000)"),
+            ("setMinPlaybackSpeed(0.97f)", "setMinPlaybackSpeed(0.96f)"),
+            ("setMaxPlaybackSpeed(1.04f)", "setMaxPlaybackSpeed(1.03f)"),
+          ]
+          for old, new in reps:
+              c = t.count(old)
+              print(c, old, "->", new)
+              t = t.replace(old, new)
+          p.write_text(t, encoding="utf-8")
+          assert "setTargetOffsetMs(120_000)" in t
+          print("ok", p.stat().st_size)
+          PY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add android/scripts/verify-player-template.mjs
+          if git diff --cached --quiet; then echo "no change"; else git commit -m "test: assert live offset 120s e speed 0.96-1.03" && git push; fi
