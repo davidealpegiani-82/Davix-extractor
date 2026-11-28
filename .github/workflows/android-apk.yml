@@ -76,77 +76,35 @@ jobs:
             exit 1
           fi
       - name: Prepare automatic app versions
+        if: github.event_name != 'pull_request'
         shell: bash
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "Skip version bump on pull_request"
-            exit 0
-          fi
           manifest_url="https://github.com/davidealpegiani-82/Davix-extractor/releases/download/player-lite-latest/version.json"
           CURRENT_MANIFEST="$(curl -fsSL "$manifest_url" || echo '{}')"
           export CURRENT_MANIFEST
-          python3 - <<'PY'
-          import json, os
-          from pathlib import Path
-          manifest = json.loads(os.environ.get("CURRENT_MANIFEST") or "{}")
-          root = Path("android")
-          def next_for(app):
-              current = manifest.get(app) or {}
-              next_code = int(current.get("versionCode") or 1) + 1
-              name = str(current.get("versionName") or "1.0.0")
-              parts = name.split(".")
-              if len(parts) >= 3 and all(p.isdigit() for p in parts[-3:]):
-                  major, minor, patch = map(int, parts[-3:])
-                  patch += 1
-                  next_name = f"{major}.{minor}.{patch}"
-              else:
-                  next_name = name + ".1"
-              return next_code, next_name
-          extractor_code, extractor_name = next_for("extractor")
-          player_code, player_name = next_for("player")
-          gradle = root / "gradle.properties"
-          text = gradle.read_text(encoding="utf-8") if gradle.exists() else ""
-          # Prefer explicit version properties if present in project scripts
-          print(f"Next extractor {extractor_name} ({extractor_code})")
-          print(f"Next player {player_name} ({player_code})")
-          Path(os.environ["GITHUB_STEP_SUMMARY"]).write_text(
-              f"Next DAVIX Extractor version: **{extractor_name} ({extractor_code})**\n"
-              f"Next DAVIX Player version: **{player_name} ({player_code})**\n",
-              encoding="utf-8",
-          )
-          # Export for subsequent gradle properties
-          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env:
-              env.write(f"EXTRACTOR_VERSION_CODE={extractor_code}\n")
-              env.write(f"EXTRACTOR_VERSION_NAME={extractor_name}\n")
-              env.write(f"PLAYER_VERSION_CODE={player_code}\n")
-              env.write(f"PLAYER_VERSION_NAME={player_name}\n")
-          PY
+          python3 android/scripts/bump-versions-from-manifest.py
       - name: Build release APKs
         shell: bash
         run: |
           set -euo pipefail
           cd android
-          ./gradlew :app:assembleRelease :playerlite:assembleRelease \
-            -PextractorVersionCode=${EXTRACTOR_VERSION_CODE:-1} \
-            -PextractorVersionName=${EXTRACTOR_VERSION_NAME:-0.0.1} \
-            -PplayerVersionCode=${PLAYER_VERSION_CODE:-1} \
-            -PplayerVersionName=${PLAYER_VERSION_NAME:-0.0.1}
+          ./gradlew :app:assemble${{ steps.apk-signing.outputs.build_type }} :playerlite:assemble${{ steps.apk-signing.outputs.build_type }}
       - name: Collect APKs
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p android/dist
-          variant="release"
-          cp "android/app/build/outputs/apk/${variant}/app-${variant}.apk" android/dist/DAVIX-Extractor.apk
-          cp "android/playerlite/build/outputs/apk/${variant}/playerlite-${variant}.apk" android/dist/DAVIX-Player.apk
+          variant="$(echo '${{ steps.apk-signing.outputs.build_type }}' | tr '[:upper:]' '[:lower:]')"
+          cp "android/app/build/outputs/apk/${variant}/"*.apk android/dist/DAVIX-Extractor.apk
+          cp "android/playerlite/build/outputs/apk/${variant}/"*.apk android/dist/DAVIX-Player.apk
           ls -la android/dist
       - name: Verify APK signatures
         shell: bash
         run: |
           set -euo pipefail
           apksigner="$(find "$ANDROID_HOME/build-tools" -name apksigner | sort | tail -n1)"
-          test -n "$apksigner" || { echo "::error::apksigner not found in Android build-tools"; exit 1; }
+          test -n "$apksigner" || { echo "::error::apksigner not found"; exit 1; }
           for apk in android/dist/DAVIX-Extractor.apk android/dist/DAVIX-Player.apk; do
             echo "Verifying $apk"
             "$apksigner" verify --verbose --print-certs "$apk"
@@ -155,7 +113,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          variant="release"
+          variant="$(echo '${{ steps.apk-signing.outputs.build_type }}' | tr '[:upper:]' '[:lower:]')"
           export DAVIX_BUILD_VARIANT="$variant"
           python3 - <<'PY'
           import json, os
