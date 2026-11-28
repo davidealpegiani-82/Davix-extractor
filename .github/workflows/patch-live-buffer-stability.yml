@@ -1,0 +1,114 @@
+name: Patch live buffer stability
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Raise live offset and keep buffer filling
+        run: |
+          python3 << 'PY'
+          import re
+          from pathlib import Path
+
+          LIVE = '''.setLiveConfiguration(
+                    MediaItem.LiveConfiguration.Builder()
+                        .setTargetOffsetMs(120_000)
+                        .setMinOffsetMs(75_000)
+                        .setMaxOffsetMs(300_000)
+                        .setMinPlaybackSpeed(0.96f)
+                        .setMaxPlaybackSpeed(1.03f)
+                        .build()
+                )'''
+
+          def patch_live(text: str) -> tuple[str, int]:
+              pattern = re.compile(
+                  r"\.setLiveConfiguration\(\s*"
+                  r"MediaItem\.LiveConfiguration\.Builder\(\)\s*"
+                  r"(?:\.[\w]+\([^)]*\)\s*)+"
+                  r"\.build\(\)\s*"
+                  r"\)",
+                  re.S,
+              )
+              return pattern.subn(LIVE, text)
+
+          def patch_buffer(text: str, durations, bytes_mb) -> tuple[str, int]:
+              new_text, n = re.subn(
+                  r"\.setBufferDurationsMs\([\s\S]*?\)",
+                  ".setBufferDurationsMs(\n"
+                  + f"                {durations[0]}, // min: mantiene il download attivo\n"
+                  + f"                {durations[1]}, // max: riserva ampia\n"
+                  + f"                {durations[2]}, // avvio\n"
+                  + f"                {durations[3]} // dopo rebuffer\n"
+                  + "            )",
+                  text,
+                  count=1,
+              )
+              if n:
+                  text = new_text
+              new_text, n2 = re.subn(
+                  r"\.setTargetBufferBytes\(\d+ \* 1024 \* 1024\)",
+                  f".setTargetBufferBytes({bytes_mb} * 1024 * 1024)",
+                  text,
+                  count=1,
+              )
+              return (new_text if n2 else text), n + n2
+
+          files = [
+              (
+                  Path("android/app/src/main/java/it/davidealpegiani/skyunoextractor/MainActivity.kt"),
+                  ("55_000", "240_000", "6_000", "30_000"),
+                  128,
+              ),
+              (
+                  Path("android/playerlite/src/main/java/it/davidealpegiani/skylite/MainActivity.kt"),
+                  ("60_000", "240_000", "6_000", "30_000"),
+                  128,
+              ),
+          ]
+
+          for path, durations, bytes_mb in files:
+              text = path.read_text(encoding="utf-8")
+              text, n_live = patch_live(text)
+              text, n_buf = patch_buffer(text, durations, bytes_mb)
+              # Meno riavvii aggressivi: aspetta di più se il buffer si sta solo assottigliando
+              text2, n_health = re.subn(
+                  r"if \(now - bufferingStartedAt >= \d+_\d+L && bufferedAheadMs < \d+_\d+L\)",
+                  "if (now - bufferingStartedAt >= 70_000L && bufferedAheadMs < 1_500L)",
+                  text,
+                  count=1,
+              )
+              if n_health:
+                  text = text2
+              # Incremento offset dopo rebuffer: allontanarsi dal live edge
+              text2, n_inc = re.subn(
+                  r"\.setTargetLiveOffsetIncrementOnRebufferMs\(\d+_\d+\)",
+                  ".setTargetLiveOffsetIncrementOnRebufferMs(40_000)",
+                  text,
+              )
+              if n_inc:
+                  text = text2
+              path.write_text(text, encoding="utf-8")
+              print(path.name, "live", n_live, "buffer", n_buf, "health", n_health, "inc", n_inc)
+          PY
+
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            android/app/src/main/java/it/davidealpegiani/skyunoextractor/MainActivity.kt \
+            android/playerlite/src/main/java/it/davidealpegiani/skylite/MainActivity.kt
+          if git diff --cached --quiet; then
+            echo "Nessuna modifica"
+          else
+            git commit -m "fix(playback): offset live più alto e buffer che resta pieno"
+            git push
+          fi
