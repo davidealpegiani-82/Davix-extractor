@@ -7,11 +7,11 @@ package it.davidealpegiani.skyunoextractor
 internal object ChannelGrouping {
 
     private val qualityTokens = Regex(
-        """\\b(uhd|4k|fhd\\+?|full\\s*hd|hd\\+?|sd|hevc|h\\.?265|h\\.?264|hq|lq|low|high|raw)\\b""",
+        "\\b(uhd|4k|fhd\\+?|full\\s*hd|hd\\+?|sd|hevc|h\\.?265|h\\.?264|hq|lq|low|high|raw)\\b",
         RegexOption.IGNORE_CASE
     )
-    private val junkTokens = Regex("""[\\[\\]\\(\\)\\{\\}|_./\\\\+\\-]+""")
-    private val multiSpace = Regex("""\\s+""")
+    private val junkTokens = Regex("[\\[\\](){}|_./\\\\+\\-]+")
+    private val multiSpace = Regex("\\s+")
 
     fun normalizeKey(name: String): String {
         var n = name.lowercase().trim()

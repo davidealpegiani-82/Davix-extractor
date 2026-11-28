@@ -1,0 +1,216 @@
+name: Patch channel groups and buffer
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Patch Extractor MainActivity (grouping + buffer)
+        run: |
+          python3 << 'PY'
+          from pathlib import Path
+          path = Path("android/app/src/main/java/it/davidealpegiani/skyunoextractor/MainActivity.kt")
+          text = path.read_text(encoding="utf-8")
+
+          # Buffer più stabili per IPTV
+          old_buf = """setBufferDurationsMs(
+                15_000, // buffer minimo
+                60_000, // limite massimo: evita riserve eccessive
+                5_000, // avvio iniziale più rapido
+                10_000 // ripresa dopo esaurimento del buffer
+            )
+            .setTargetBufferBytes(48 * 1024 * 1024)
+            .setPrioritizeTimeOverSizeThresholds(false)"""
+          new_buf = """setBufferDurationsMs(
+                25_000, // buffer minimo più alto: meno rebuffer su reti/server IPTV instabili
+                120_000, // riserva massima più ampia
+                3_000, // avvio non troppo lento
+                12_000 // ripresa dopo rebuffer con margine
+            )
+            .setTargetBufferBytes(64 * 1024 * 1024)
+            .setPrioritizeTimeOverSizeThresholds(true)"""
+          if old_buf not in text:
+              print("WARN: buffer Extractor non trovato o già modificato")
+          else:
+              text = text.replace(old_buf, new_buf, 1)
+              print("buffer Extractor ok")
+
+          # Live offset un po' più sicuro (meno bordo live)
+          old_live = """MediaItem.LiveConfiguration.Builder()
+                        .setTargetOffsetMs(45_000)
+                        .setMinOffsetMs(30_000)
+                        .setMaxOffsetMs(90_000)"""
+          new_live = """MediaItem.LiveConfiguration.Builder()
+                        .setTargetOffsetMs(55_000)
+                        .setMinOffsetMs(35_000)
+                        .setMaxOffsetMs(120_000)"""
+          if old_live in text:
+              text = text.replace(old_live, new_live)
+              print("live config Extractor ok")
+
+          # Sostituisci rendering foglia con raggruppamento varianti
+          old_loop = """node.entries.take(rowsToRender).forEach { entry ->
+                        renderedChannelRows++
+                        val holder = LinearLayout(this).apply {
+                            setPadding(dp(10 + (depth + 1) * 14), 0, 0, 0)
+                        }
+                        addChannelRow(entry.index, entry.value, holder)"""
+          new_loop = """val grouped = ChannelGrouping.groupEntries(node.entries)
+                    val groupsToRender = grouped.take(rowsToRender)
+                    groupsToRender.forEach { group ->
+                        renderedChannelRows++
+                        val primaryIndex = group.indices.first()
+                        val primary = channels[primaryIndex]
+                        val holder = LinearLayout(this).apply {
+                            setPadding(dp(10 + (depth + 1) * 14), 0, 0, 0)
+                        }
+                        addChannelRow(primaryIndex, primary, holder, group.indices, group.displayName)"""
+          if old_loop not in text:
+              raise SystemExit("loop entries non trovato")
+          text = text.replace(old_loop, new_loop, 1)
+          print("loop grouping ok")
+
+          # Firma addChannelRow con varianti
+          old_sig = "fun addChannelRow(index: Int, channel: TvChannel, target: LinearLayout) {"
+          new_sig = "fun addChannelRow(index: Int, channel: TvChannel, target: LinearLayout, variantIndices: List<Int> = listOf(index), displayName: String = channel.name) {"
+          if old_sig not in text:
+              raise SystemExit("addChannelRow signature non trovata")
+          text = text.replace(old_sig, new_sig, 1)
+
+          old_play_text = """val play = Button(this).apply {
+                tag = channel.name
+                text = channel.name
+                isAllCaps = false
+                textSize = 13f
+                maxLines = 2
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                minWidth = 0
+                gravity = Gravity.CENTER_VERTICAL or Gravity.START
+                setPadding(dp(5), 0, dp(5), 0)
+                setTextColor(if (isPlayingChannel) CYAN else Color.WHITE)
+                setBackgroundColor(Color.TRANSPARENT)
+                contentDescription = if (isPlayingChannel) "${channel.name}, in riproduzione" else "Riproduci ${channel.name}"
+                if (isPlayingChannel) playingChannelButton = this
+                setOnClickListener { playChannel(index, this) }
+            }"""
+          new_play_text = """val variantCount = variantIndices.size
+            val label = if (variantCount > 1) "$displayName · $variantCount versioni" else displayName
+            val isGroupPlaying = variantIndices.any { channels.getOrNull(it)?.url == currentPlayingChannelUrl }
+            val play = Button(this).apply {
+                tag = displayName
+                text = label
+                isAllCaps = false
+                textSize = 13f
+                maxLines = 2
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                minWidth = 0
+                gravity = Gravity.CENTER_VERTICAL or Gravity.START
+                setPadding(dp(5), 0, dp(5), 0)
+                setTextColor(if (isGroupPlaying || isPlayingChannel) CYAN else Color.WHITE)
+                setBackgroundColor(Color.TRANSPARENT)
+                contentDescription = if (variantCount > 1) "Scegli versione di $displayName" else if (isPlayingChannel) "$displayName, in riproduzione" else "Riproduci $displayName"
+                if (isGroupPlaying || isPlayingChannel) playingChannelButton = this
+                setOnClickListener {
+                    if (variantCount <= 1) playChannel(index, this)
+                    else showChannelVariants(displayName, variantIndices, this)
+                }
+            }"""
+          if old_play_text not in text:
+              raise SystemExit("play button block non trovato")
+          text = text.replace(old_play_text, new_play_text, 1)
+          print("play button ok")
+
+          # Aggiungi showChannelVariants prima di playChannel
+          marker = "    private fun playChannel(index: Int, clickedButton: Button? = null) {"
+          helper = '''    private fun showChannelVariants(displayName: String, variantIndices: List<Int>, clickedButton: Button? = null) {
+        val labels = variantIndices.map { idx ->
+            val ch = channels[idx]
+            val q = ChannelGrouping.qualityLabel(ch.name)
+            val src = ch.category.takeIf { it.isNotBlank() && it != "Non classificati" } ?: ""
+            buildString {
+                append(ch.name)
+                append("  ·  ")
+                append(q)
+                if (src.isNotBlank()) append("  ·  ").append(src)
+            }
+        }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("Versioni di $displayName")
+            .setItems(labels) { _, which ->
+                val chosen = variantIndices.getOrNull(which) ?: return@setItems
+                playChannel(chosen, clickedButton)
+            }
+            .setNegativeButton("Annulla", null)
+            .show()
+    }
+
+'''
+          if "showChannelVariants" not in text:
+              if marker not in text:
+                  raise SystemExit("playChannel marker non trovato")
+              text = text.replace(marker, helper + marker, 1)
+              print("showChannelVariants ok")
+          else:
+              print("showChannelVariants già presente")
+
+          path.write_text(text, encoding="utf-8")
+          print("MainActivity patched", path.stat().st_size)
+          PY
+
+      - name: Patch Player LoadControl buffer
+        run: |
+          python3 << 'PY'
+          from pathlib import Path
+          path = Path("android/playerlite/src/main/java/it/davidealpegiani/skylite/MainActivity.kt")
+          text = path.read_text(encoding="utf-8")
+          old = """setBufferDurationsMs(
+                30_000,
+                90_000,
+                8_000,
+                15_000
+            )"""
+          # Read surrounding prioritize line context dynamically
+          if old not in text:
+              print("WARN player buffer block not exact")
+          else:
+              text = text.replace(old, """setBufferDurationsMs(
+                35_000,
+                150_000,
+                4_000,
+                15_000
+            )""", 1)
+              print("player buffer durations ok")
+          text2 = text.replace(
+              "setPrioritizeTimeOverSizeThresholds(false)",
+              "setPrioritizeTimeOverSizeThresholds(true)",
+              1
+          )
+          if text2 == text:
+              print("WARN prioritize not found")
+          else:
+              text = text2
+              print("player prioritize ok")
+          path.write_text(text, encoding="utf-8")
+          print("Player patched", path.stat().st_size)
+          PY
+
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add android/app/src/main/java/it/davidealpegiani/skyunoextractor/MainActivity.kt \
+                  android/playerlite/src/main/java/it/davidealpegiani/skylite/MainActivity.kt \
+                  android/app/src/main/java/it/davidealpegiani/skyunoextractor/ChannelGrouping.kt
+          if git diff --cached --quiet; then
+            echo "Nessuna modifica"
+          else
+            git commit -m "feat: unifica canali duplicati in versioni + buffer IPTV più stabili"
+            git push
+          fi
