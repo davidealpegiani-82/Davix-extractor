@@ -1,1 +1,203 @@
-PLACEHOLDER
+name: Build DAVIX Android APKs
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "android/**"
+      - ".github/workflows/android-apk.yml"
+  push:
+    branches: [main]
+    paths:
+      - "android/**"
+      - ".github/workflows/android-apk.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify shared HTML player template
+        run: node android/scripts/verify-player-template.mjs
+      - name: Verify automatic app versioning
+        run: node android/scripts/verify-updater-versioning.mjs
+      - name: Verify import memory retention
+        run: node android/scripts/verify-import-memory.mjs
+      - name: Verify hierarchical URL categories
+        run: node android/scripts/verify-url-categories.mjs
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.13"
+      - name: Prepare APK signing
+        id: apk-signing
+        shell: bash
+        env:
+          DAVIX_KEYSTORE_BASE64: ${{ github.event_name != 'pull_request' && secrets.DAVIX_KEYSTORE_BASE64 || '' }}
+          DAVIX_SIGNING_STORE_PASSWORD: ${{ github.event_name != 'pull_request' && secrets.DAVIX_KEYSTORE_PASSWORD || '' }}
+          DAVIX_SIGNING_KEY_ALIAS: ${{ github.event_name != 'pull_request' && secrets.DAVIX_KEY_ALIAS || '' }}
+          DAVIX_SIGNING_KEY_PASSWORD: ${{ github.event_name != 'pull_request' && secrets.DAVIX_KEY_PASSWORD || '' }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            keytool -genkeypair -noprompt -storetype JKS -keystore "$RUNNER_TEMP/davix-ci-test.jks" -storepass "davix-ci-test-store" -keypass "davix-ci-test-key" -alias davix-ci-test -dname "CN=DAVIX CI Test" -keyalg RSA -keysize 2048 -validity 2
+            echo "DAVIX_SIGNING_STORE_FILE=$RUNNER_TEMP/davix-ci-test.jks" >> "$GITHUB_ENV"
+            echo "DAVIX_SIGNING_STORE_PASSWORD=davix-ci-test-store" >> "$GITHUB_ENV"
+            echo "DAVIX_SIGNING_KEY_ALIAS=davix-ci-test" >> "$GITHUB_ENV"
+            echo "DAVIX_SIGNING_KEY_PASSWORD=davix-ci-test-key" >> "$GITHUB_ENV"
+            echo "build_type=Release" >> "$GITHUB_OUTPUT"
+            echo "stable_signing=false" >> "$GITHUB_OUTPUT"
+            echo "Using an ephemeral test key to verify signed release builds; no repository secrets are exposed."
+          elif [ -n "$DAVIX_KEYSTORE_BASE64" ] && [ -n "$DAVIX_SIGNING_STORE_PASSWORD" ] && [ -n "$DAVIX_SIGNING_KEY_ALIAS" ] && [ -n "$DAVIX_SIGNING_KEY_PASSWORD" ]; then
+            printf '%s' "$DAVIX_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/davix-release.jks"
+            chmod 600 "$RUNNER_TEMP/davix-release.jks"
+            echo "DAVIX_SIGNING_STORE_FILE=$RUNNER_TEMP/davix-release.jks" >> "$GITHUB_ENV"
+            echo "DAVIX_SIGNING_STORE_PASSWORD=$DAVIX_SIGNING_STORE_PASSWORD" >> "$GITHUB_ENV"
+            echo "DAVIX_SIGNING_KEY_ALIAS=$DAVIX_SIGNING_KEY_ALIAS" >> "$GITHUB_ENV"
+            echo "DAVIX_SIGNING_KEY_PASSWORD=$DAVIX_SIGNING_KEY_PASSWORD" >> "$GITHUB_ENV"
+            echo "build_type=Release" >> "$GITHUB_OUTPUT"
+            echo "stable_signing=true" >> "$GITHUB_OUTPUT"
+            echo "Stable release signing enabled."
+          else
+            echo "::error::Missing DAVIX signing secrets for a non-pull-request build."
+            echo "stable_signing=false" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+      - name: Prepare automatic app versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "Skip version bump on pull_request"
+            exit 0
+          fi
+          manifest_url="https://github.com/davidealpegiani-82/Davix-extractor/releases/download/player-lite-latest/version.json"
+          CURRENT_MANIFEST="$(curl -fsSL "$manifest_url" || echo '{}')"
+          export CURRENT_MANIFEST
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          manifest = json.loads(os.environ.get("CURRENT_MANIFEST") or "{}")
+          root = Path("android")
+          def next_for(app):
+              current = manifest.get(app) or {}
+              next_code = int(current.get("versionCode") or 1) + 1
+              name = str(current.get("versionName") or "1.0.0")
+              parts = name.split(".")
+              if len(parts) >= 3 and all(p.isdigit() for p in parts[-3:]):
+                  major, minor, patch = map(int, parts[-3:])
+                  patch += 1
+                  next_name = f"{major}.{minor}.{patch}"
+              else:
+                  next_name = name + ".1"
+              return next_code, next_name
+          extractor_code, extractor_name = next_for("extractor")
+          player_code, player_name = next_for("player")
+          gradle = root / "gradle.properties"
+          text = gradle.read_text(encoding="utf-8") if gradle.exists() else ""
+          # Prefer explicit version properties if present in project scripts
+          print(f"Next extractor {extractor_name} ({extractor_code})")
+          print(f"Next player {player_name} ({player_code})")
+          Path(os.environ["GITHUB_STEP_SUMMARY"]).write_text(
+              f"Next DAVIX Extractor version: **{extractor_name} ({extractor_code})**\n"
+              f"Next DAVIX Player version: **{player_name} ({player_code})**\n",
+              encoding="utf-8",
+          )
+          # Export for subsequent gradle properties
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env:
+              env.write(f"EXTRACTOR_VERSION_CODE={extractor_code}\n")
+              env.write(f"EXTRACTOR_VERSION_NAME={extractor_name}\n")
+              env.write(f"PLAYER_VERSION_CODE={player_code}\n")
+              env.write(f"PLAYER_VERSION_NAME={player_name}\n")
+          PY
+      - name: Build release APKs
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd android
+          ./gradlew :app:assembleRelease :playerlite:assembleRelease \
+            -PextractorVersionCode=${EXTRACTOR_VERSION_CODE:-1} \
+            -PextractorVersionName=${EXTRACTOR_VERSION_NAME:-0.0.1} \
+            -PplayerVersionCode=${PLAYER_VERSION_CODE:-1} \
+            -PplayerVersionName=${PLAYER_VERSION_NAME:-0.0.1}
+      - name: Collect APKs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p android/dist
+          variant="release"
+          cp "android/app/build/outputs/apk/${variant}/app-${variant}.apk" android/dist/DAVIX-Extractor.apk
+          cp "android/playerlite/build/outputs/apk/${variant}/playerlite-${variant}.apk" android/dist/DAVIX-Player.apk
+          ls -la android/dist
+      - name: Verify APK signatures
+        shell: bash
+        run: |
+          set -euo pipefail
+          apksigner="$(find "$ANDROID_HOME/build-tools" -name apksigner | sort | tail -n1)"
+          test -n "$apksigner" || { echo "::error::apksigner not found in Android build-tools"; exit 1; }
+          for apk in android/dist/DAVIX-Extractor.apk android/dist/DAVIX-Player.apk; do
+            echo "Verifying $apk"
+            "$apksigner" verify --verbose --print-certs "$apk"
+          done
+      - name: Generate updater manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          variant="release"
+          export DAVIX_BUILD_VARIANT="$variant"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          variant = os.environ["DAVIX_BUILD_VARIANT"]
+          def read_meta(path):
+              data = json.loads(Path(path).read_text())
+              element = data["elements"][0]
+              return {"versionCode": int(element["versionCode"]), "versionName": element["versionName"]}
+          extractor = read_meta(f"android/app/build/outputs/apk/{variant}/output-metadata.json")
+          player = read_meta(f"android/playerlite/build/outputs/apk/{variant}/output-metadata.json")
+          base = "https://github.com/davidealpegiani-82/Davix-extractor/releases/download/player-lite-latest/"
+          manifest = {
+              "extractor": {**extractor, "apkUrl": base + "DAVIX-Extractor.apk"},
+              "player": {**player, "apkUrl": base + "DAVIX-Player.apk"}
+          }
+          Path("android/dist/version.json").write_text(json.dumps(manifest, indent=2) + "\n")
+          print(Path("android/dist/version.json").read_text())
+          PY
+      - name: Upload DAVIX Extractor APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: DAVIX-Extractor
+          path: "android/dist/DAVIX-Extractor.apk"
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload DAVIX Player APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: DAVIX-Player
+          path: "android/dist/DAVIX-Player.apk"
+          if-no-files-found: error
+          retention-days: 30
+      - name: Publish stable DAVIX Player APK
+        if: github.ref == 'refs/heads/main' && steps.apk-signing.outputs.stable_signing == 'true' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: player-lite-latest
+          name: DAVIX Player - ultima build
+          prerelease: true
+          make_latest: false
+          files: |
+            android/dist/DAVIX-Extractor.apk
+            android/dist/DAVIX-Player.apk
+            android/dist/version.json
