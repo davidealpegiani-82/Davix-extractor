@@ -235,7 +235,7 @@ internal object VegetaItImporter {
     }
 
     private fun extractAttr(line: String, key: String): String {
-        val regex = Regex("""$key="([^"]*)"""", RegexOption.IGNORE_CASE)
+        val regex = Regex("""$key="([^"]*)""", RegexOption.IGNORE_CASE)
         return regex.find(line)?.groupValues?.getOrNull(1)?.trim().orEmpty()
     }
 }
