@@ -1,0 +1,82 @@
+name: Patch live offset v2
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Literal replacements for live offset and buffers
+        run: |
+          python3 << 'PY'
+          from pathlib import Path
+
+          replacements = [
+              (".setTargetOffsetMs(60_000)", ".setTargetOffsetMs(120_000)"),
+              (".setTargetOffsetMs(55_000)", ".setTargetOffsetMs(120_000)"),
+              (".setMinOffsetMs(45_000)", ".setMinOffsetMs(75_000)"),
+              (".setMinOffsetMs(35_000)", ".setMinOffsetMs(75_000)"),
+              (".setMaxOffsetMs(120_000)", ".setMaxOffsetMs(300_000)"),
+              (".setTargetLiveOffsetIncrementOnRebufferMs(25_000)", ".setTargetLiveOffsetIncrementOnRebufferMs(40_000)"),
+              (".setTargetLiveOffsetIncrementOnRebufferMs(15_000)", ".setTargetLiveOffsetIncrementOnRebufferMs(40_000)"),
+              # buffer durations blocks already partially updated; force common old values
+              ("25_000, // buffer minimo più alto", "60_000, // buffer minimo: non lasciare scaricare a zero"),
+              ("40_000, // buffer minimo", "60_000, // buffer minimo: non lasciare scaricare a zero"),
+              ("40_000, // min: mantiene il download attivo", "60_000, // buffer minimo: non lasciare scaricare a zero"),
+              ("55_000, // min: mantiene il download attivo", "60_000, // buffer minimo: non lasciare scaricare a zero"),
+              ("120_000, // riserva massima più ampia", "240_000, // riserva massima ampia"),
+              ("180_000, // riserva massima", "240_000, // riserva massima ampia"),
+              ("180_000, // max: riserva ampia", "240_000, // riserva massima ampia"),
+              ("3_000, // avvio non troppo lento", "6_000, // avvio"),
+              ("5_000, // avvio leggermente più cauto", "6_000, // avvio"),
+              ("5_000, // avvio", "6_000, // avvio"),
+              ("12_000 // ripresa dopo rebuffer con margine", "30_000 // dopo rebuffer"),
+              ("20_000 // ripresa dopo rebuffer con margine più ampio", "30_000 // dopo rebuffer"),
+              ("20_000 // dopo rebuffer", "30_000 // dopo rebuffer"),
+              ("22_000 // dopo rebuffer", "30_000 // dopo rebuffer"),
+              (".setTargetBufferBytes(64 * 1024 * 1024)", ".setTargetBufferBytes(128 * 1024 * 1024)"),
+              (".setTargetBufferBytes(96 * 1024 * 1024)", ".setTargetBufferBytes(128 * 1024 * 1024)"),
+              (".setTargetBufferBytes(112 * 1024 * 1024)", ".setTargetBufferBytes(128 * 1024 * 1024)"),
+              # numeric buffer blocks without comments (player)
+              (""".setBufferDurationsMs(\n                35_000,\n                150_000,\n                4_000,\n                15_000\n            )""",
+               """.setBufferDurationsMs(\n                60_000, // buffer minimo: non lasciare scaricare a zero\n                240_000, // riserva massima ampia\n                6_000, // avvio\n                30_000 // dopo rebuffer\n            )"""),
+              (""".setBufferDurationsMs(\n                45_000,\n                180_000,\n                5_000,\n                22_000\n            )""",
+               """.setBufferDurationsMs(\n                60_000, // buffer minimo: non lasciare scaricare a zero\n                240_000, // riserva massima ampia\n                6_000, // avvio\n                30_000 // dopo rebuffer\n            )"""),
+          ]
+
+          paths = [
+              Path("android/app/src/main/java/it/davidealpegiani/skyunoextractor/MainActivity.kt"),
+              Path("android/playerlite/src/main/java/it/davidealpegiani/skylite/MainActivity.kt"),
+          ]
+          for path in paths:
+              text = path.read_text(encoding="utf-8")
+              total = 0
+              for old, new in replacements:
+                  count = text.count(old)
+                  if count:
+                      text = text.replace(old, new)
+                      total += count
+                      print(path.name, "replaced", count, "x", old[:50])
+              path.write_text(text, encoding="utf-8")
+              print(path.name, "total replacements", total)
+          PY
+
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            android/app/src/main/java/it/davidealpegiani/skyunoextractor/MainActivity.kt \
+            android/playerlite/src/main/java/it/davidealpegiani/skylite/MainActivity.kt
+          if git diff --cached --quiet; then
+            echo "Nessuna modifica"
+          else
+            git commit -m "fix(playback): resta indietro dal live edge e tiene il buffer pieno"
+            git push
+          fi
