@@ -21,27 +21,35 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "22"
+
       - name: Verify shared HTML player template
         run: node android/scripts/verify-player-template.mjs
+
       - name: Verify automatic app versioning
         run: node android/scripts/verify-updater-versioning.mjs
+
       - name: Verify import memory retention
         run: node android/scripts/verify-import-memory.mjs
+
       - name: Verify hierarchical URL categories
         run: node android/scripts/verify-url-categories.mjs
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.13"
+
       - name: Prepare APK signing
         id: apk-signing
         shell: bash
@@ -75,63 +83,67 @@ jobs:
             echo "stable_signing=false" >> "$GITHUB_OUTPUT"
             exit 1
           fi
+
       - name: Prepare automatic app versions
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         shell: bash
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "Skip version bump on pull_request"
-            exit 0
-          fi
-          node android/scripts/verify-updater-versioning.mjs --prepare || true
-          # Inline version bump from live manifest (same logic as historic workflow)
           manifest_url="https://github.com/davidealpegiani-82/Davix-extractor/releases/download/player-lite-latest/version.json"
-          CURRENT_MANIFEST="$(curl -fsSL "$manifest_url" || echo '{}')"
-          export CURRENT_MANIFEST
-          python3 - <<'PY'
-          import json, os
-          from pathlib import Path
-          manifest = json.loads(os.environ.get("CURRENT_MANIFEST") or "{}")
-          def next_for(app):
-              current = manifest.get(app) or {}
-              next_code = int(current.get("versionCode") or 1) + 1
-              name = str(current.get("versionName") or "1.0.0")
-              parts = name.split(".")
-              if len(parts) >= 3 and all(p.isdigit() for p in parts[-3:]):
-                  major, minor, patch = map(int, parts[-3:])
-                  next_name = f"{major}.{minor}.{patch+1}"
-              else:
-                  next_name = name + ".1"
-              return next_code, next_name
-          extractor_code, extractor_name = next_for("extractor")
-          player_code, player_name = next_for("player")
-          print(f"Next extractor {extractor_name} ({extractor_code})")
-          print(f"Next player {player_name} ({player_code})")
-          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env:
-              env.write(f"EXTRACTOR_VERSION_CODE={extractor_code}\n")
-              env.write(f"EXTRACTOR_VERSION_NAME={extractor_name}\n")
-              env.write(f"PLAYER_VERSION_CODE={player_code}\n")
-              env.write(f"PLAYER_VERSION_NAME={player_name}\n")
+          current_manifest="$(curl --fail --silent --show-error --location "$manifest_url")"
+          CURRENT_MANIFEST="$current_manifest" python3 - <<'PY' >> "$GITHUB_ENV"
+          import json
+          import os
+
+          manifest = json.loads(os.environ["CURRENT_MANIFEST"])
+          for app, prefix in (("extractor", "DAVIX_EXTRACTOR"), ("player", "DAVIX_PLAYER")):
+              current = manifest[app]
+              next_code = int(current["versionCode"]) + 1
+              parts = str(current["versionName"]).split(".")
+              if not parts or not parts[-1].isdigit():
+                  raise SystemExit(f"{app} versionName is not a numeric semantic version")
+              parts[-1] = str(int(parts[-1]) + 1)
+              next_name = ".".join(parts)
+              print(f"{prefix}_VERSION_CODE={next_code}")
+              print(f"{prefix}_VERSION_NAME={next_name}")
+              with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+                  summary.write(f"Next DAVIX {app.title()} version: **{next_name} ({next_code})**\n")
           PY
-      - name: Build release APKs
-        shell: bash
+
+      - name: Build both APKs
+        working-directory: android
         env:
           DAVIX_BUILD_TYPE: ${{ steps.apk-signing.outputs.build_type }}
         run: |
-          set -euo pipefail
-          cd android
-          gradle --no-daemon ":app:assemble${DAVIX_BUILD_TYPE}" ":playerlite:assemble${DAVIX_BUILD_TYPE}" -PextractorVersionCode=${EXTRACTOR_VERSION_CODE:-1} -PextractorVersionName=${EXTRACTOR_VERSION_NAME:-0.0.1} -PplayerVersionCode=${PLAYER_VERSION_CODE:-1} -PplayerVersionName=${PLAYER_VERSION_NAME:-0.0.1}
-      - name: Collect APKs
-        shell: bash
+          gradle --no-daemon ":app:testDebugUnitTest" ":playerlite:testDebugUnitTest"
+          gradle --no-daemon ":app:assemble${DAVIX_BUILD_TYPE}" ":playerlite:assemble${DAVIX_BUILD_TYPE}"
+
+      - name: Collect and rename APKs
         env:
           DAVIX_BUILD_TYPE: ${{ steps.apk-signing.outputs.build_type }}
+        shell: bash
         run: |
           set -euo pipefail
-          mkdir -p android/dist
           variant="$(echo "$DAVIX_BUILD_TYPE" | tr '[:upper:]' '[:lower:]')"
-          cp "android/app/build/outputs/apk/${variant}/"*.apk android/dist/DAVIX-Extractor.apk
-          cp "android/playerlite/build/outputs/apk/${variant}/"*.apk android/dist/DAVIX-Player.apk
+          extractor_dir="android/app/build/outputs/apk/$variant"
+          player_dir="android/playerlite/build/outputs/apk/$variant"
+          extractor_apk="$(find "$extractor_dir" -type f -name '*.apk' ! -name '*unsigned*.apk' -print -quit)"
+          player_apk="$(find "$player_dir" -type f -name '*.apk' ! -name '*unsigned*.apk' -print -quit)"
+          if [ -z "$extractor_apk" ]; then
+            echo "::error::No Extractor APK found under $extractor_dir"
+            find android/app/build/outputs -maxdepth 5 -type f -print || true
+            exit 1
+          fi
+          if [ -z "$player_apk" ]; then
+            echo "::error::No Player APK found under $player_dir"
+            find android/playerlite/build/outputs -maxdepth 5 -type f -print || true
+            exit 1
+          fi
+          mkdir -p android/dist
+          cp "$extractor_apk" android/dist/DAVIX-Extractor.apk
+          cp "$player_apk" android/dist/DAVIX-Player.apk
           ls -la android/dist
+
       - name: Verify APK signatures
         shell: bash
         run: |
@@ -142,6 +154,7 @@ jobs:
             echo "Verifying $apk"
             "$apksigner" verify --verbose --print-certs "$apk"
           done
+
       - name: Generate updater manifest
         shell: bash
         env:
@@ -168,6 +181,7 @@ jobs:
           Path("android/dist/version.json").write_text(json.dumps(manifest, indent=2) + "\n")
           print(Path("android/dist/version.json").read_text())
           PY
+
       - name: Upload DAVIX Extractor APK
         uses: actions/upload-artifact@v4
         with:
@@ -175,6 +189,7 @@ jobs:
           path: "android/dist/DAVIX-Extractor.apk"
           if-no-files-found: error
           retention-days: 30
+
       - name: Upload DAVIX Player APK
         uses: actions/upload-artifact@v4
         with:
@@ -182,6 +197,7 @@ jobs:
           path: "android/dist/DAVIX-Player.apk"
           if-no-files-found: error
           retention-days: 30
+
       - name: Publish stable DAVIX Player APK
         if: github.ref == 'refs/heads/main' && steps.apk-signing.outputs.stable_signing == 'true' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         uses: softprops/action-gh-release@v2
