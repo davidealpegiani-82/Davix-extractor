@@ -95,7 +95,7 @@ assert.match(template, /scheme=skylite;package=it\.davidealpegiani\.skylite/);
 assert.match(template, /DAVIX-Player\.apk/);
 assert.doesNotMatch(template, /cast_sender|cast\.framework|castBtn|Google Cast|Trasmetti/i, 'exported player must not contain Cast');
 assert.match(kotlin, /setBufferDurationsMs\(\s*60_000,[\s\S]*?240_000,[\s\S]*?6_000,[\s\S]*?30_000[\s\S]*?\)/, 'Extractor must preserve the previously working live buffer profile');
-assert.match(kotlin, /setTargetBufferBytes\(192 \* 1024 \* 1024\)/, 'Extractor must allocate enough buffer memory for sustained live download');
+assert.match(kotlin, /setTargetBufferBytes\(128 \* 1024 \* 1024\)/, 'Extractor must allocate enough buffer memory for sustained live download');
 assert.match(kotlin, /DefaultMediaSourceFactory\(this\)/, 'Extractor must support adaptive and progressive stream types');
 assert.match(kotlin, /streamMimeType\(channel\.url\)/, 'Extractor must not force every stream to HLS');
 assert.match(kotlin, /HttpDataSource\.InvalidResponseCodeException/, 'Extractor must classify HTTP playback failures');
@@ -103,7 +103,7 @@ assert.match(kotlin, /playbackRetryCount\.coerceAtMost\(delays\.lastIndex\)/, 'E
 assert.match(kotlin, /httpStatus == 408 \|\| httpStatus == 425 \|\| httpStatus == 429 \|\| httpStatus in 500\.\.599/, 'Extractor must not retry permanent HTTP client errors');
 assert.match(kotlin, /setBufferDurationsMs\(\s*60_000,[\s\S]*?240_000,[\s\S]*?6_000,[\s\S]*?30_000[\s\S]*?\)/, 'Extractor must preserve the previously working live buffer profile');
 assert.match(lite, /setBufferDurationsMs\(\s*60_000,[\s\S]*?240_000,[\s\S]*?6_000,[\s\S]*?30_000/s, 'Player Lite must preserve the previously working live buffer profile');
-assert.match(lite, /setTargetBufferBytes\(192 \* 1024 \* 1024\)/, 'Player Lite must allocate enough buffer memory for sustained live download');
+assert.match(lite, /setTargetBufferBytes\(128 \* 1024 \* 1024\)/, 'Player Lite must allocate enough buffer memory for sustained live download');
 assert.match(lite, /setPrioritizeTimeOverSizeThresholds\(true\)/, 'Player Lite must prioritize time-based buffering so download continues toward the live offset');
 assert.match(lite, /DefaultRenderersFactory\(this\)\.setEnableDecoderFallback\(true\)/, 'Player Lite must allow Media3 to fall back when a hardware decoder fails');
 assert.match(lite, /terminalPlaybackFailure/, 'terminal playback errors must suppress the idle watchdog retry loop');
