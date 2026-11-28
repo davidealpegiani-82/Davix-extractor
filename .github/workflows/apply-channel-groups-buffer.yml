@@ -1,0 +1,30 @@
+name: Apply channel groups buffer patch
+
+on:
+  push:
+    paths:
+      - "android/scripts/apply-channel-groups-buffer.py"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run patch
+        run: python3 android/scripts/apply-channel-groups-buffer.py
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add android/app/src/main/java/it/davidealpegiani/skyunoextractor/MainActivity.kt \
+                  android/playerlite/src/main/java/it/davidealpegiani/skylite/MainActivity.kt
+          if git diff --cached --quiet; then
+            echo "Nessuna modifica"
+          else
+            git commit -m "feat: unifica canali duplicati in versioni + buffer IPTV piu stabili"
+            git push
+          fi
