@@ -21,27 +21,35 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "22"
+
       - name: Verify shared HTML player template
         run: node android/scripts/verify-player-template.mjs
+
       - name: Verify automatic app versioning
         run: node android/scripts/verify-updater-versioning.mjs
+
       - name: Verify import memory retention
         run: node android/scripts/verify-import-memory.mjs
+
       - name: Verify hierarchical URL categories
         run: node android/scripts/verify-url-categories.mjs
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.13"
+
       - name: Prepare APK signing
         id: apk-signing
         shell: bash
@@ -75,30 +83,35 @@ jobs:
             echo "stable_signing=false" >> "$GITHUB_OUTPUT"
             exit 1
           fi
+
       - name: Prepare automatic app versions
         if: github.event_name != 'pull_request'
         shell: bash
         run: |
           set -euo pipefail
-          manifest_url="https://github.com/davidealpegiani-82/Davix-extractor/releases/download/player-lite-latest/version.json"
-          CURRENT_MANIFEST="$(curl -fsSL "$manifest_url" || echo '{}')"
-          export CURRENT_MANIFEST
-          python3 android/scripts/bump-versions-from-manifest.py
+          node android/scripts/prepare-app-versions.mjs
+
       - name: Build release APKs
         shell: bash
+        env:
+          DAVIX_BUILD_TYPE: ${{ steps.apk-signing.outputs.build_type }}
         run: |
           set -euo pipefail
           cd android
-          ./gradlew :app:assemble${{ steps.apk-signing.outputs.build_type }} :playerlite:assemble${{ steps.apk-signing.outputs.build_type }}
+          gradle --no-daemon ":app:assemble${DAVIX_BUILD_TYPE}" ":playerlite:assemble${DAVIX_BUILD_TYPE}"
+
       - name: Collect APKs
         shell: bash
+        env:
+          DAVIX_BUILD_TYPE: ${{ steps.apk-signing.outputs.build_type }}
         run: |
           set -euo pipefail
           mkdir -p android/dist
-          variant="$(echo '${{ steps.apk-signing.outputs.build_type }}' | tr '[:upper:]' '[:lower:]')"
+          variant="$(echo "$DAVIX_BUILD_TYPE" | tr '[:upper:]' '[:lower:]')"
           cp "android/app/build/outputs/apk/${variant}/"*.apk android/dist/DAVIX-Extractor.apk
           cp "android/playerlite/build/outputs/apk/${variant}/"*.apk android/dist/DAVIX-Player.apk
           ls -la android/dist
+
       - name: Verify APK signatures
         shell: bash
         run: |
@@ -109,11 +122,14 @@ jobs:
             echo "Verifying $apk"
             "$apksigner" verify --verbose --print-certs "$apk"
           done
+
       - name: Generate updater manifest
         shell: bash
+        env:
+          DAVIX_BUILD_TYPE: ${{ steps.apk-signing.outputs.build_type }}
         run: |
           set -euo pipefail
-          variant="$(echo '${{ steps.apk-signing.outputs.build_type }}' | tr '[:upper:]' '[:lower:]')"
+          variant="$(echo "$DAVIX_BUILD_TYPE" | tr '[:upper:]' '[:lower:]')"
           export DAVIX_BUILD_VARIANT="$variant"
           python3 - <<'PY'
           import json, os
@@ -133,6 +149,7 @@ jobs:
           Path("android/dist/version.json").write_text(json.dumps(manifest, indent=2) + "\n")
           print(Path("android/dist/version.json").read_text())
           PY
+
       - name: Upload DAVIX Extractor APK
         uses: actions/upload-artifact@v4
         with:
@@ -140,6 +157,7 @@ jobs:
           path: "android/dist/DAVIX-Extractor.apk"
           if-no-files-found: error
           retention-days: 30
+
       - name: Upload DAVIX Player APK
         uses: actions/upload-artifact@v4
         with:
@@ -147,6 +165,7 @@ jobs:
           path: "android/dist/DAVIX-Player.apk"
           if-no-files-found: error
           retention-days: 30
+
       - name: Publish stable DAVIX Player APK
         if: github.ref == 'refs/heads/main' && steps.apk-signing.outputs.stable_signing == 'true' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         uses: softprops/action-gh-release@v2
