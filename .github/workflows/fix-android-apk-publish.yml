@@ -1,0 +1,42 @@
+name: Fix APK publish workflow
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Restore and patch android-apk.yml
+        run: |
+          set -euo pipefail
+          GOOD=00f9ea2ca6a0343dfebd205f447a5490e9860ad4
+          git show "$GOOD:.github/workflows/android-apk.yml" > .github/workflows/android-apk.yml
+          python3 << 'PY'
+          from pathlib import Path
+          path = Path(".github/workflows/android-apk.yml")
+          text = path.read_text(encoding="utf-8")
+          old = "if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.apk-signing.outputs.stable_signing == 'true'"
+          new = "if: github.ref == 'refs/heads/main' && steps.apk-signing.outputs.stable_signing == 'true' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')"
+          if old not in text:
+              raise SystemExit("condizione publish non trovata")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          print("patched ok")
+          PY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/android-apk.yml
+          if git diff --cached --quiet; then
+            echo "Nessuna modifica"
+          else
+            git commit -m "ci: pubblica APK/version.json anche da build manuali"
+            git push
+          fi
