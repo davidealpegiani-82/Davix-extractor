@@ -186,7 +186,7 @@ class MainActivity : FragmentActivity() {
         // Profilo più leggero per dispositivi TV/Android con memoria limitata.
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                55_000, // min: mantiene il download attivo
+                60_000, // buffer minimo: non lasciare scaricare a zero
                 240_000, // max: riserva ampia
                 6_000, // avvio
                 30_000 // dopo rebuffer
