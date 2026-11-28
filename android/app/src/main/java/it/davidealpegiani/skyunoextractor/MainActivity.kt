@@ -186,12 +186,14 @@ class MainActivity : FragmentActivity() {
         // Profilo più leggero per dispositivi TV/Android con memoria limitata.
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                60_000, // buffer minimo: non lasciare scaricare a zero
-                240_000, // max: riserva ampia
-                6_000, // avvio
-                30_000 // dopo rebuffer
+                90_000, // soglia minima: continua a caricare almeno 90 secondi quando la sorgente lo consente
+                120_000, // tetto live: mantiene una riserva continua senza accumulare latenza eccessiva
+                6_000, // avvio rapido
+                30_000 // ripresa dopo rebuffer
             )
-            .setTargetBufferBytes(128 * 1024 * 1024)
+            // Margine di memoria maggiore per evitare che il target RAM interrompa il caricamento
+            // prima della soglia temporale richiesta sui flussi HD.
+            .setTargetBufferBytes(192 * 1024 * 1024)
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 

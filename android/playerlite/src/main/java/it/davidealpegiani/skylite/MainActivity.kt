@@ -1782,14 +1782,14 @@ class MainActivity : Activity() {
     private fun initializePlayer() {
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                60_000, // min: mantiene il download attivo
-                240_000, // max: riserva ampia
-                6_000, // avvio
-                30_000 // dopo rebuffer
+                90_000, // soglia minima: continua a caricare almeno 90 secondi quando la sorgente lo consente
+                120_000, // tetto live: mantiene una riserva continua senza accumulare latenza eccessiva
+                6_000, // avvio rapido
+                30_000 // ripresa dopo rebuffer
             )
-            // Limita la memoria occupata dai segmenti: la durata del buffer non deve
-            // crescere senza controllo su TV con memoria ridotta.
-            .setTargetBufferBytes(128 * 1024 * 1024)
+            // Margine di memoria maggiore per evitare che il target RAM interrompa il caricamento
+            // prima della soglia temporale richiesta sui flussi HD.
+            .setTargetBufferBytes(192 * 1024 * 1024)
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
