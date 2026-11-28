@@ -113,8 +113,8 @@ assert.match(lite, /maxOf\(localDelay, lastServerRetryAfterMs\)/, 'server retry 
 assert.match(lite, /recordPlaybackDiagnostic\(/, 'Player Lite must retain a local playback diagnostic history');
 assert.match(lite, /setOnLongClickListener/, 'playback diagnostics must be accessible from the existing diagnostics panel');
 assert.match(lite, /setTargetLiveOffsetIncrementOnRebufferMs\(40_000\)/);
-assert.match(lite, /setMinPlaybackSpeed\(0\.97f\)/);
-assert.match(lite, /setMaxPlaybackSpeed\(1\.04f\)/);
+assert.match(lite, /setMinPlaybackSpeed\(0\.96f\)/);
+assert.match(lite, /setMaxPlaybackSpeed\(1\.03f\)/);
 assert.match(lite, /DefaultLoadErrorHandlingPolicy\(8\)/);
 assert.ok(lite.includes('private fun isRetryableHttpStatus(code: Int): Boolean =') && lite.includes('code == 403 || code == 406 || code == 408 || code == 425 || code == 429 || code in 500..599'), 'Player Lite must retry transient HTTP failures but not permanent authorization/client errors');
 assert.ok(lite.includes('private fun isRetryablePlaybackError(error: PlaybackException)') && lite.includes('name.startsWith("ERROR_CODE_IO_")'), 'Player Lite must classify network errors and avoid retrying decoder/parsing failures');
@@ -144,7 +144,7 @@ assert.match(template, /layoutLabel\.textContent=portrait\?/, 'HTML Player must 
 assert.match(lite, /eventTime\.timeline == current\.currentTimeline/, 'HLS analytics must belong to the active Media3 timeline');
 assert.match(lite, /private fun schedulePlaybackRecovery\(/, 'Player Lite must have a persistent automatic recovery path');
 assert.match(lite, /longArrayOf\(2_000L, 4_000L, 8_000L, 15_000L, 30_000L, 45_000L, 60_000L\)/, 'recovery retries must use capped backoff without a fixed attempt limit');
-assert.match(lite, /setTargetOffsetMs\(60_000\)/, 'live playback must keep a larger safety offset');
+assert.match(lite, /setTargetOffsetMs\(120_000\)/, 'live playback must keep a larger safety offset');
 assert.match(lite, /private fun toggleFullscreen\(\)/, 'Player Lite must expose a native fullscreen toggle');
 assert.match(lite, /playerContainer\.addView\(fullscreenButton\)/, 'Player Lite fullscreen control must be layered over the video');
 assert.match(lite, /SYSTEM_UI_FLAG_IMMERSIVE_STICKY/, 'Player Lite fullscreen must hide system bars');
