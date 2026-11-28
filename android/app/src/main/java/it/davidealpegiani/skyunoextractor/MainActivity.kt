@@ -186,13 +186,13 @@ class MainActivity : FragmentActivity() {
         // Profilo più leggero per dispositivi TV/Android con memoria limitata.
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                15_000, // buffer minimo
-                60_000, // limite massimo: evita riserve eccessive
-                5_000, // avvio iniziale più rapido
-                10_000 // ripresa dopo esaurimento del buffer
+                25_000, // buffer minimo più alto
+                120_000, // riserva massima più ampia
+                3_000, // avvio non troppo lento
+                12_000 // ripresa dopo rebuffer con margine
             )
-            .setTargetBufferBytes(48 * 1024 * 1024)
-            .setPrioritizeTimeOverSizeThresholds(false)
+            .setTargetBufferBytes(64 * 1024 * 1024)
+            .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
         // Dopo ogni rebuffer Media3 aumenta il margine dal bordo live, così il
@@ -2312,7 +2312,7 @@ class MainActivity : FragmentActivity() {
         selectedHeading.visibility = if (selected.isEmpty()) View.GONE else View.VISIBLE
         otherHeading.visibility = if (others.isEmpty()) View.GONE else View.VISIBLE
 
-        fun addChannelRow(index: Int, channel: TvChannel, target: LinearLayout) {
+        fun addChannelRow(index: Int, channel: TvChannel, target: LinearLayout, variantIndices: List<Int> = listOf(index), displayName: String = channel.name) {
             val isPlayingChannel = currentPlayingChannelUrl == channel.url
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -2342,9 +2342,12 @@ class MainActivity : FragmentActivity() {
                 }
                 row.addView(bulkCheck)
             }
+            val variantCount = variantIndices.size
+            val label = if (variantCount > 1) "$displayName · $variantCount versioni" else displayName
+            val isGroupPlaying = variantIndices.any { channels.getOrNull(it)?.url == currentPlayingChannelUrl }
             val play = Button(this).apply {
-                tag = channel.name
-                text = channel.name
+                tag = displayName
+                text = label
                 isAllCaps = false
                 textSize = 13f
                 maxLines = 2
@@ -2352,11 +2355,14 @@ class MainActivity : FragmentActivity() {
                 minWidth = 0
                 gravity = Gravity.CENTER_VERTICAL or Gravity.START
                 setPadding(dp(5), 0, dp(5), 0)
-                setTextColor(if (isPlayingChannel) CYAN else Color.WHITE)
+                setTextColor(if (isGroupPlaying || isPlayingChannel) CYAN else Color.WHITE)
                 setBackgroundColor(Color.TRANSPARENT)
-                contentDescription = if (isPlayingChannel) "${channel.name}, in riproduzione" else "Riproduci ${channel.name}"
-                if (isPlayingChannel) playingChannelButton = this
-                setOnClickListener { playChannel(index, this) }
+                contentDescription = if (variantCount > 1) "Scegli versione di $displayName" else if (isPlayingChannel) "$displayName, in riproduzione" else "Riproduci $displayName"
+                if (isGroupPlaying || isPlayingChannel) playingChannelButton = this
+                setOnClickListener {
+                    if (variantCount <= 1) playChannel(index, this)
+                    else showChannelVariants(displayName, variantIndices, this)
+                }
             }
             row.addView(play, LinearLayout.LayoutParams(0, dp(48), 1f))
             val editButton = buttonView("✎") { showCategoryPicker(channel) }.apply {
@@ -2511,12 +2517,16 @@ class MainActivity : FragmentActivity() {
                         .coerceAtLeast(CHANNELS_PER_FOLDER_PAGE)
                     val remainingChannelSlots = (channelLimit - renderedChannelRows).coerceAtLeast(0)
                     val rowsToRender = minOf(node.entries.size, visibleLimit, remainingChannelSlots)
-                    node.entries.take(rowsToRender).forEach { entry ->
+                    val grouped = ChannelGrouping.groupEntries(node.entries)
+                    val groupsToRender = grouped.take(rowsToRender)
+                    groupsToRender.forEach { group ->
                         renderedChannelRows++
+                        val primaryIndex = group.indices.first()
+                        val primary = channels[primaryIndex]
                         val holder = LinearLayout(this).apply {
                             setPadding(dp(10 + (depth + 1) * 14), 0, 0, 0)
                         }
-                        addChannelRow(entry.index, entry.value, holder)
+                        addChannelRow(primaryIndex, primary, holder, group.indices, group.displayName)
                         target.addView(holder, LinearLayout.LayoutParams(
                             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
                         ))
@@ -2934,9 +2944,9 @@ class MainActivity : FragmentActivity() {
             val mediaItem = mediaItemBuilder
                 .setLiveConfiguration(
                     MediaItem.LiveConfiguration.Builder()
-                        .setTargetOffsetMs(45_000)
-                        .setMinOffsetMs(30_000)
-                        .setMaxOffsetMs(90_000)
+                        .setTargetOffsetMs(55_000)
+                        .setMinOffsetMs(35_000)
+                        .setMaxOffsetMs(120_000)
                         .setMinPlaybackSpeed(0.97f)
                         .setMaxPlaybackSpeed(1.03f)
                         .build()

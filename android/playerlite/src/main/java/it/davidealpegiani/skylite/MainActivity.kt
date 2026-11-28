@@ -1782,15 +1782,15 @@ class MainActivity : Activity() {
     private fun initializePlayer() {
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                30_000,
-                90_000,
-                8_000,
+                35_000,
+                150_000,
+                4_000,
                 15_000
             )
             // Limita la memoria occupata dai segmenti: la durata del buffer non deve
             // crescere senza controllo su TV con memoria ridotta.
             .setTargetBufferBytes(96 * 1024 * 1024)
-            .setPrioritizeTimeOverSizeThresholds(false)
+            .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
         // Allinea le richieste HLS al profilo HTTP del browser Android:
