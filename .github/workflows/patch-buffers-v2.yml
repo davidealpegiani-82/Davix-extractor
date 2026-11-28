@@ -1,0 +1,60 @@
+name: Patch buffers v2
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch
+        run: |
+          python3 << 'PY'
+          import re
+          from pathlib import Path
+
+          def patch(path, durations, bytes_mb):
+              text = path.read_text(encoding="utf-8")
+              new_text, n = re.subn(
+                  r"\.setBufferDurationsMs\([\s\S]*?\)",
+                  ".setBufferDurationsMs(\n"
+                  + f"                {durations[0]}, // buffer minimo\n"
+                  + f"                {durations[1]}, // riserva massima\n"
+                  + f"                {durations[2]}, // avvio\n"
+                  + f"                {durations[3]} // dopo rebuffer\n"
+                  + "            )",
+                  text,
+                  count=1,
+              )
+              print(path.name, "durations", n)
+              text = new_text if n else text
+              new_text, n2 = re.subn(
+                  r"\.setTargetBufferBytes\(\d+ \* 1024 \* 1024\)",
+                  f".setTargetBufferBytes({bytes_mb} * 1024 * 1024)",
+                  text,
+                  count=1,
+              )
+              print(path.name, "bytes", n2)
+              path.write_text(new_text if n2 else text, encoding="utf-8")
+
+          patch(
+              Path("android/app/src/main/java/it/davidealpegiani/skyunoextractor/MainActivity.kt"),
+              ("40_000", "180_000", "5_000", "20_000"),
+              96,
+          )
+          patch(
+              Path("android/playerlite/src/main/java/it/davidealpegiani/skylite/MainActivity.kt"),
+              ("45_000", "180_000", "5_000", "22_000"),
+              112,
+          )
+          PY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add android/app/src/main/java/it/davidealpegiani/skyunoextractor/MainActivity.kt android/playerlite/src/main/java/it/davidealpegiani/skylite/MainActivity.kt
+          if git diff --cached --quiet; then echo "Nessuna modifica"; else git commit -m "perf: buffer più ampi Extractor/Player" && git push; fi
