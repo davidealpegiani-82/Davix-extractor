@@ -1,0 +1,112 @@
+name: Patch playback buffer and channel variants
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Patch Extractor MainActivity + Player buffers
+        run: |
+          python3 << 'PY'
+          from pathlib import Path
+
+          ma = Path("android/app/src/main/java/it/davidealpegiani/skyunoextractor/MainActivity.kt")
+          text = ma.read_text(encoding="utf-8")
+
+          old_call = "else showChannelVariants(displayName, variantIndices, this)"
+          new_call = "else ChannelVariantUi.show(this@MainActivity, displayName, channels, variantIndices) { playChannel(it, this) }"
+          if old_call in text:
+              text = text.replace(old_call, new_call, 1)
+              print("variant call patched")
+          elif "ChannelVariantUi.show" in text:
+              print("variant call already patched")
+          else:
+              print("WARN: variant call site not found")
+
+          old_buf = """            .setBufferDurationsMs(
+                25_000, // buffer minimo più alto
+                120_000, // riserva massima più ampia
+                3_000, // avvio non troppo lento
+                12_000 // ripresa dopo rebuffer con margine
+            )
+            .setTargetBufferBytes(64 * 1024 * 1024)"""
+          new_buf = """            .setBufferDurationsMs(
+                40_000, // buffer minimo più alto: meno interruzioni su reti instabili
+                180_000, // riserva massima più ampia
+                5_000, // avvio leggermente più cauto
+                20_000 // ripresa dopo rebuffer con margine più ampio
+            )
+            .setTargetBufferBytes(96 * 1024 * 1024)"""
+          if old_buf in text:
+              text = text.replace(old_buf, new_buf, 1)
+              print("extractor buffer patched")
+          else:
+              print("WARN: extractor buffer block not found")
+
+          text = text.replace(
+              ".setTargetLiveOffsetIncrementOnRebufferMs(15_000)",
+              ".setTargetLiveOffsetIncrementOnRebufferMs(25_000)",
+              1,
+          )
+          ma.write_text(text, encoding="utf-8")
+
+          pl = Path("android/playerlite/src/main/java/it/davidealpegiani/skylite/MainActivity.kt")
+          ptext = pl.read_text(encoding="utf-8")
+          old_p = """            .setBufferDurationsMs(
+                35_000,
+                150_000,
+                4_000,
+                15_000
+            )
+            // Limita la memoria occupata dai segmenti: la durata del buffer non deve
+            // crescere senza controllo su TV con memoria ridotta.
+            .setTargetBufferBytes(96 * 1024 * 1024)"""
+          new_p = """            .setBufferDurationsMs(
+                45_000,
+                180_000,
+                5_000,
+                22_000
+            )
+            // Limita la memoria occupata dai segmenti: la durata del buffer non deve
+            // crescere senza controllo su TV con memoria ridotta.
+            .setTargetBufferBytes(112 * 1024 * 1024)"""
+          if old_p in ptext:
+              ptext = ptext.replace(old_p, new_p, 1)
+              print("player buffer patched")
+          else:
+              print("WARN: player buffer block not found")
+
+          ptext = ptext.replace(
+              ".setTargetLiveOffsetIncrementOnRebufferMs(15_000)",
+              ".setTargetLiveOffsetIncrementOnRebufferMs(25_000)",
+              1,
+          )
+          ptext = ptext.replace(
+              "if (now - bufferingStartedAt >= 35_000L && bufferedAheadMs < 3_000L)",
+              "if (now - bufferingStartedAt >= 50_000L && bufferedAheadMs < 2_000L)",
+              1,
+          )
+          pl.write_text(ptext, encoding="utf-8")
+          print("done")
+          PY
+
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            android/app/src/main/java/it/davidealpegiani/skyunoextractor/MainActivity.kt \
+            android/playerlite/src/main/java/it/davidealpegiani/skylite/MainActivity.kt
+          if git diff --cached --quiet; then
+            echo "Nessuna modifica"
+          else
+            git commit -m "fix: selettore versioni canali + buffer più stabili Extractor/Player"
+            git push
+          fi
