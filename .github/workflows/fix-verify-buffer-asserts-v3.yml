@@ -1,0 +1,69 @@
+name: Fix verify buffer asserts v3
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Restore and patch
+        run: |
+          set -euo pipefail
+          git show e6cd8beadb765790b3c0ae8f96d5b61b25da081b:android/scripts/verify-player-template.mjs > android/scripts/verify-player-template.mjs
+          python3 << 'PY'
+          from pathlib import Path
+          path = Path("android/scripts/verify-player-template.mjs")
+          text = path.read_text(encoding="utf-8")
+          if len(text) < 5000:
+              raise SystemExit("too small")
+          reps = [
+              ("15_000,[\\s\\S]*?60_000,[\\s\\S]*?5_000,[\\s\\S]*?10_000", "60_000,[\\s\\S]*?240_000,[\\s\\S]*?6_000,[\\s\\S]*?30_000"),
+              ("Extractor must use a bounded low-memory live buffer", "Extractor must keep a deep live buffer to avoid drain-to-zero stalls"),
+              ("48 \\* 1024 \\* 1024", "128 \\* 1024 \\* 1024"),
+              ("Extractor must cap buffer memory on TV devices", "Extractor must allocate enough buffer memory for sustained live download"),
+              ("30_000,\\s*90_000,\\s*8_000,\\s*15_000", "60_000,[\\s\\S]*?240_000,[\\s\\S]*?6_000,[\\s\\S]*?30_000"),
+              ("Player Lite must use a bounded live buffer profile", "Player Lite must keep a deep live buffer to avoid drain-to-zero stalls"),
+              ("96 \\* 1024 \\* 1024", "128 \\* 1024 \\* 1024"),
+              ("Player Lite must cap the target buffer to limit memory pressure on TV devices", "Player Lite must allocate enough buffer memory for sustained live download"),
+              ("setPrioritizeTimeOverSizeThresholds\\(false\\)", "setPrioritizeTimeOverSizeThresholds\\(true\\)"),
+              ("Player Lite must respect its memory target instead of buffering time without a size limit", "Player Lite must prioritize time-based buffering so download continues toward the live offset"),
+              ("setTargetLiveOffsetIncrementOnRebufferMs\\(15_000\\)", "setTargetLiveOffsetIncrementOnRebufferMs\\(40_000\\)"),
+              ("now - bufferingStartedAt >= 35_000L", "now - bufferingStartedAt >= 70_000L"),
+              ("buffering watchdog must recover sooner after sustained stalls", "buffering watchdog must allow Media3 internal retries before a full restart"),
+          ]
+          total = 0
+          for old, new in reps:
+              c = text.count(old)
+              print(c, old[:50])
+              if c:
+                  text = text.replace(old, new)
+                  total += c
+          path.write_text(text, encoding="utf-8")
+          print("replacements", total, "size", path.stat().st_size)
+          if "PLACEHOLDER" in text:
+              raise SystemExit("placeholder")
+          if "15_000,[\\s\\S]*?60_000,[\\s\\S]*?5_000" in text:
+              raise SystemExit("old buffer pattern remains")
+          if "60_000,[\\s\\S]*?240_000" not in text:
+              raise SystemExit("new buffer pattern missing")
+          PY
+
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add android/scripts/verify-player-template.mjs
+          if git diff --cached --quiet; then
+            echo "Nessuna modifica"
+          else
+            git commit -m "test: verify-player-template allineato al buffer 60/240s"
+            git push
+          fi
