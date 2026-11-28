@@ -1,0 +1,92 @@
+name: Fix verify buffer asserts
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Restore and patch verify script
+        run: |
+          set -euo pipefail
+          # Ultima versione completa prima dei PLACEHOLDER
+          git show e6cd8beadb765790b3c0ae8f96d5b61b25da081b:android/scripts/verify-player-template.mjs > android/scripts/verify-player-template.mjs
+          python3 << 'PY'
+          from pathlib import Path
+          path = Path("android/scripts/verify-player-template.mjs")
+          text = path.read_text(encoding="utf-8")
+          reps = [
+            (
+              "assert.match(kotlin, /setBufferDurationsMs\\(\\s*15_000,[\\s\\S]*?60_000,[\\s\\S]*?5_000,[\\s\\S]*?10_000[\\s\\S]*?\\)/, 'Extractor must use a bounded low-memory live buffer');",
+              "assert.match(kotlin, /setBufferDurationsMs\\(\\s*60_000,[\\s\\S]*?240_000,[\\s\\S]*?6_000,[\\s\\S]*?30_000[\\s\\S]*?\\)/, 'Extractor must keep a deep live buffer to avoid drain-to-zero stalls');",
+            ),
+            (
+              "assert.match(kotlin, /setTargetBufferBytes\\(48 \\* 1024 \\* 1024\\)/, 'Extractor must cap buffer memory on TV devices');",
+              "assert.match(kotlin, /setTargetBufferBytes\\(128 \\* 1024 \\* 1024\\)/, 'Extractor must allocate enough buffer memory for sustained live download');",
+            ),
+            (
+              "assert.match(lite, /setBufferDurationsMs\\(\\s*30_000,\\s*90_000,\\s*8_000,\\s*15_000/s, 'Player Lite must use a bounded live buffer profile');",
+              "assert.match(lite, /setBufferDurationsMs\\(\\s*60_000,[\\s\\S]*?240_000,[\\s\\S]*?6_000,[\\s\\S]*?30_000/s, 'Player Lite must keep a deep live buffer to avoid drain-to-zero stalls');",
+            ),
+            (
+              "assert.match(lite, /setTargetBufferBytes\\(96 \\* 1024 \\* 1024\\)/, 'Player Lite must cap the target buffer to limit memory pressure on TV devices');",
+              "assert.match(lite, /setTargetBufferBytes\\(128 \\* 1024 \\* 1024\\)/, 'Player Lite must allocate enough buffer memory for sustained live download');",
+            ),
+            (
+              "assert.match(lite, /setPrioritizeTimeOverSizeThresholds\\(false\\)/, 'Player Lite must respect its memory target instead of buffering time without a size limit');",
+              "assert.match(lite, /setPrioritizeTimeOverSizeThresholds\\(true\\)/, 'Player Lite must prioritize time-based buffering so download continues toward the live offset');",
+            ),
+            (
+              "assert.match(lite, /setTargetLiveOffsetIncrementOnRebufferMs\\(15_000\\)/);",
+              "assert.match(lite, /setTargetLiveOffsetIncrementOnRebufferMs\\(40_000\\)/);",
+            ),
+            (
+              "assert.match(lite, /now - bufferingStartedAt >= 35_000L/, 'buffering watchdog must recover sooner after sustained stalls');",
+              "assert.match(lite, /now - bufferingStartedAt >= 70_000L/, 'buffering watchdog must allow Media3 internal retries before a full restart');",
+            ),
+          ]
+          # Also replace second duplicate extractor buffer assert if present
+          n = 0
+          for old, new in reps:
+              c = text.count(old)
+              if c:
+                  text = text.replace(old, new)
+                  n += c
+                  print("replaced", c, old[:60])
+              else:
+                  print("missing", old[:60])
+          # Duplicate kotlin buffer line appears twice in original - replace any remaining old pattern
+          import re
+          text2, c2 = re.subn(
+              r"assert\.match\(kotlin, /setBufferDurationsMs\\\(\\s\*15_000,[\\s\\S]\*\?60_000,[\\s\\S]\*\?5_000,[\\s\\S]\*\?10_000[\\s\\S]\*\?\\\)/, '[^']*'\);",
+              "assert.match(kotlin, /setBufferDurationsMs(\\s*60_000,[\\s\\S]*?240_000,[\\s\\S]*?6_000,[\\s\\S]*?30_000[\\s\\S]*?)/, 'Extractor must keep a deep live buffer to avoid drain-to-zero stalls');",
+              text,
+          )
+          if c2:
+              text = text2
+              print("regex replaced", c2)
+          path.write_text(text, encoding="utf-8")
+          print("total", n, "size", path.stat().st_size)
+          if path.stat().st_size < 1000:
+              raise SystemExit("file too small")
+          PY
+
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add android/scripts/verify-player-template.mjs
+          if git diff --cached --quiet; then
+            echo "Nessuna modifica"
+          else
+            git commit -m "test: verify-player-template allineato al buffer 60/240s"
+            git push
+          fi
